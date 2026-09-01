@@ -15,7 +15,7 @@ from human_input_automation.core.target import (
     WindowCapabilities,
 )
 from human_input_automation.core.timing import TimingProfile
-from human_input_automation.ui.main_window import build_status_text
+from human_input_automation.ui.models import host_status_text
 
 from .fakes import FakeClock, FakeKeyboard, FakeMouse, FakeWindows, make_target
 
@@ -83,7 +83,7 @@ def test_status_text_surfaces_platform_limitations() -> None:
         warnings=("Wayland restricts input",),
     )
     service, _ = build_service(host)
-    text = build_status_text(service)
+    text = host_status_text(service.host, service.problems)
     assert "wayland" in text
     assert "Wayland restricts input" in text
     assert "Missing permissions: something" in text

@@ -3,20 +3,26 @@
 Cross-platform desktop automation for keyboard and mouse input, inspired by
 AutoIt. Windows, macOS and Ubuntu/Linux.
 
-**Status:** Phase 1 complete — the automation core, interfaces, engine, timing
-and safety mechanisms are implemented and tested. The desktop UI and the
-platform adapters are Phase 2 and Phase 3 (see `docs/ROADMAP.md`).
+**Status:** Phase 2 complete — the automation core *and* a working desktop UI.
+Real per-platform adapter behaviour is Phase 3, profile persistence is Phase 4
+(see `docs/ROADMAP.md`).
 
 ## What it does
 
-- Type text and run keyboard/mouse action sequences
-- Send input to a **selected target window**, not just whatever has focus
-- Configurable, natural timing: bounded jitter, word and punctuation pauses,
-  per-action delays, mouse movement duration, deterministic seeds
-- Start / Pause / Resume / Stop, plus an emergency stop that interrupts a
-  pending delay instead of waiting it out
-- Dry-run mode that reports every action without touching the desktop
-- Safety limits on action count, text length and run duration
+- Pick a **target window** from a live list and send input to it — never a
+  silent fallback to whatever happens to be focused
+- Build an action sequence: type text, key presses, key down/up, shortcuts,
+  mouse move/click/down/up, waits, with per-action delay overrides
+- Configure natural timing: bounded jitter, min/max, word and punctuation
+  pauses, action delays, mouse movement duration, optional fixed seed — with a
+  live preview sampled from the same timing service the engine uses
+- Start / Pause / Resume / Stop, a cancellable pre-run countdown, and an
+  always-visible emergency stop (`Ctrl+.`, plus a global `Ctrl+Alt+.` hotkey
+  where the platform allows it)
+- Dry-run preview that reports every action and the estimated duration without
+  sending any input
+- A run log of structured events, and a capability banner that says what this
+  machine can actually do
 
 ### What it deliberately does not do
 
@@ -30,8 +36,9 @@ accessibility and productivity work.
 ```bash
 python -m venv .venv
 # activate the environment
-pip install -e ".[dev]"          # core + pytest/ruff/mypy (no desktop needed)
-pip install -e ".[dev,desktop]"  # adds PySide6, pynput and pywinctl
+pip install -e ".[dev]"               # core + pytest/ruff/mypy (no desktop needed)
+pip install -e ".[dev,gui]"           # adds PySide6, enough to run the UI and its tests
+pip install -e ".[dev,desktop]"       # adds PySide6 + pynput + pywinctl (real input)
 ```
 
 The core has **no runtime dependencies**. Everything that touches a real desktop
@@ -41,20 +48,54 @@ three).
 ## Run
 
 ```bash
-python -m human_input_automation --check   # report platform capabilities
 python -m human_input_automation           # desktop UI (needs the gui extra)
+python -m human_input_automation --check   # report platform capabilities, headless
+python -m human_input_automation --verbose # add diagnostic logging
 ```
 
-`--check` is the fastest way to see what your machine supports:
+`--check` needs no display and no GUI extra. Exit code 0 means automation can be
+attempted (possibly with restrictions), 1 means it is unavailable or a
+permission is missing:
 
 ```
+⚠ LIMITED: linux/wayland restricts window control; input can be sent but windows
+cannot be listed or focused.
+
 Platform: linux (wayland)
 Send input: yes
 Enumerate windows: no
 Activate windows: no
 Verify focus: no
-Note: Wayland compositors restrict global synthetic input and window control ...
+Emergency hotkey: Wayland does not let applications observe global key presses;
+use the on-screen emergency stop.
 ```
+
+## The window
+
+```
+┌───────────────────────────────────────────────────────────────┐
+│ ⚠ LIMITED / ✓ OK / ✗ UNAVAILABLE  capability + permission     │
+├──────────────────────────┬────────────────────────────────────┤
+│ TARGET                   │ ACTIONS                            │
+│ [Refresh windows]        │ 1. type 'Hello' (5 chars)          │
+│ Title | App | PID | Plat │ 2. press enter                     │
+│ Active target: ...       │ [Add][Edit][Delete][Up][Down]      │
+├──────────────────────────┼────────────────────────────────────┤
+│ TIMING                   │ DRY RUN - NO INPUT WILL BE SENT    │
+│ base/jitter/min/max      │ Estimated duration: 1.2 s          │
+│ word/punctuation/action  │ 1. type 'Hello' ...                │
+│ Next delays: 78 104 65   │ Completed 2 action(s).             │
+├──────────────────────────┴────────────────────────────────────┤
+│ RUN LOG   21:55:08  Run started: desktop plan, 2 action(s)    │
+├───────────────────────────────────────────────────────────────┤
+│ State: Running   [Start][Pause][Resume][Stop][Dry run] [3 s]   │
+│ ███████████████ EMERGENCY STOP (Ctrl+.) ███████████████        │
+└───────────────────────────────────────────────────────────────┘
+```
+
+While a run is in flight the target list, action editor and timing fields lock,
+so the plan cannot change under a running engine. The emergency stop stays
+enabled in every state, including during the countdown and while paused.
 
 ## Using the core directly
 
@@ -65,7 +106,8 @@ from human_input_automation.core import (
 )
 
 service = AutomationService()
-target = service.list_targets()[0]          # or service.focused_window_target()
+listing = service.discover_targets()        # .targets, plus .reason when empty
+target = listing.targets[0]
 
 plan = AutomationPlan(
     target=target,
@@ -80,7 +122,7 @@ plan = AutomationPlan(
 )
 
 print(service.dry_run(plan).performed)      # inspect before running for real
-service.start(plan)                         # runs on a worker thread
+service.start(plan, countdown_seconds=3)    # runs on a worker thread
 service.emergency_stop()                    # returns immediately, releases held keys
 ```
 
@@ -92,22 +134,32 @@ service.emergency_stop()                    # returns immediately, releases held
 | Activate window | yes | with permission | yes | no |
 | Verify focus | yes | with permission | yes | no |
 | Synthetic input | yes | Accessibility permission | yes | restricted (XWayland clients at best) |
+| Global stop hotkey | yes | Input Monitoring permission | yes | no |
 
 macOS requires Accessibility permission for the host application; without it,
 input and window control silently do nothing, so the app reports the missing
 permission instead of pretending to work. Wayland restricts window control and
-global input injection by design — the app says so rather than failing quietly.
+global input injection by design — the app says so, and the on-screen emergency
+stop always works regardless.
+
+These capability tables describe what each platform *allows*. Real end-to-end
+input behaviour on Windows, macOS and X11 has not been verified on those
+systems yet; that is Phase 3.
 
 ## Development
 
 ```bash
-pytest          # 115 tests, no desktop required
+pytest                                     # 253 tests with the gui extra, 187 without
 ruff check .
 mypy src
+mypy src tests
+python -m human_input_automation --check
 ```
 
-The core is tested entirely against fake adapters and a virtual clock, so the
-suite runs headless on all three platforms in CI.
+Qt tests use the `offscreen` platform plugin (set automatically in
+`tests/conftest.py`), so the whole suite runs headless; without PySide6 the
+three Qt modules skip themselves. No test needs a real desktop, display server
+or OS permission.
 
-See `docs/ARCHITECTURE.md` for the layering and design decisions,
-`docs/ROADMAP.md` for what comes next.
+See `docs/ARCHITECTURE.md` for the layering, the Qt threading rule and the
+design decisions, `docs/ROADMAP.md` for what comes next.

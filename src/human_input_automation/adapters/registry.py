@@ -7,14 +7,16 @@ gets a null adapter plus an explanation, instead of an exception at import time.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..core.errors import AdapterUnavailableError
 from ..core.target import PlatformReport
 from ..ports.clock import Clock
+from ..ports.hotkeys import HotkeyPort
 from ..ports.input import KeyboardPort, MousePort
 from ..ports.window import WindowControlPort, WindowDiscoveryPort
+from .hotkeys import HotkeySupport, NullHotkey, describe_hotkey_support
 from .null import NullKeyboard, NullMouse, NullWindowBackend
 from .platform_info import describe_host
 from .system_clock import SystemClock
@@ -33,6 +35,10 @@ class AdapterSet:
     discovery: WindowDiscoveryPort | None
     clock: Clock
     host: PlatformReport
+    hotkey: HotkeyPort = field(default_factory=NullHotkey)
+    hotkey_support: HotkeySupport = field(
+        default_factory=lambda: HotkeySupport(None, "Global hotkey support was not probed.")
+    )
     problems: tuple[str, ...] = ()
 
     @property
@@ -55,6 +61,13 @@ def build_window_adapter(host: PlatformReport) -> PyWinCtlWindows:
     return PyWinCtlWindows(host)
 
 
+def build_hotkey_adapter() -> HotkeyPort:
+    """Construct the global-hotkey adapter (it registers nothing until started)."""
+    from .pynput_hotkey import PynputHotkey
+
+    return PynputHotkey()
+
+
 def build_adapters(*, allow_desktop: bool = True) -> AdapterSet:
     """Best-effort wiring of every adapter for the current host."""
     host = describe_host()
@@ -65,6 +78,8 @@ def build_adapters(*, allow_desktop: bool = True) -> AdapterSet:
     mouse: MousePort = NullMouse()
     windows: WindowControlPort | None = None
     discovery: WindowDiscoveryPort | None = None
+    hotkey: HotkeyPort = NullHotkey()
+    hotkey_support = describe_hotkey_support(host)
 
     if allow_desktop:
         try:
@@ -78,6 +93,11 @@ def build_adapters(*, allow_desktop: bool = True) -> AdapterSet:
             problems.append(str(exc))
             fallback = NullWindowBackend()
             windows, discovery = fallback, fallback
+        if not hotkey_support.is_known_unsupported:
+            try:
+                hotkey = build_hotkey_adapter()
+            except AdapterUnavailableError as exc:  # pragma: no cover - import guarded
+                problems.append(str(exc))
 
     return AdapterSet(
         keyboard=keyboard,
@@ -86,5 +106,7 @@ def build_adapters(*, allow_desktop: bool = True) -> AdapterSet:
         discovery=discovery,
         clock=SystemClock(),
         host=host,
+        hotkey=hotkey,
+        hotkey_support=hotkey_support,
         problems=tuple(problems),
     )

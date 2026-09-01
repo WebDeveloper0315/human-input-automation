@@ -32,6 +32,27 @@ class RunEvent:
 
 
 @dataclass(frozen=True)
+class CountdownStarted(RunEvent):
+    """A pre-run countdown began. No target has been touched yet."""
+
+    seconds: float
+
+
+@dataclass(frozen=True)
+class CountdownTick(RunEvent):
+    """One countdown step elapsed; ``remaining`` counts down to zero."""
+
+    remaining: float
+
+
+@dataclass(frozen=True)
+class CountdownCancelled(RunEvent):
+    """The countdown was stopped before the run started."""
+
+    emergency: bool = False
+
+
+@dataclass(frozen=True)
 class RunStarted(RunEvent):
     plan_name: str
     action_count: int

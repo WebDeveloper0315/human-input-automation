@@ -2,9 +2,11 @@ name: CI
 on: [push, pull_request]
 
 jobs:
-  # The core and its tests are dependency-free and use fake adapters, so this
-  # matrix runs on plain headless runners - no desktop session, no X server, no
-  # macOS Accessibility permission required.
+  # The core, the application layer and the presentation models are
+  # dependency-free and use fake adapters, so this matrix runs on plain headless
+  # runners - no desktop session, no X server, no macOS Accessibility
+  # permission. The Qt-dependent tests skip themselves when the gui extra is
+  # absent; the `gui` job below covers them.
   test:
     name: tests (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
@@ -25,6 +27,26 @@ jobs:
       - run: pip install -e ".[dev]"
       - run: pytest
 
+  # Qt tests use the offscreen platform plugin, so they need no display server.
+  gui:
+    name: Qt tests (offscreen)
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: install Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon0 libdbus-1-3 libfontconfig1 libglib2.0-0
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev,gui]"
+      - run: pytest
+
   quality:
     name: ruff + mypy
     runs-on: ubuntu-latest
@@ -34,9 +56,22 @@ jobs:
         with:
           python-version: "3.13"
       - run: python -m pip install --upgrade pip
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,gui]"
       - run: ruff check .
       - run: mypy src
+      - run: mypy src tests
+
+  headless:
+    name: headless capability check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install -e "."
+      - name: --check must work without a display or the gui extra
+        run: python -m human_input_automation --check || test $? -eq 1
 
   packaging:
     name: build wheel
@@ -58,6 +93,8 @@ jobs:
               "human_input_automation/ports/input.py",
               "human_input_automation/adapters/registry.py",
               "human_input_automation/application/service.py",
+              "human_input_automation/ui/main_window.py",
+              "human_input_automation/ui/models.py",
               "human_input_automation/py.typed",
           ]
           missing = [name for name in expected if name not in names]

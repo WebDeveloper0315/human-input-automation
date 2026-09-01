@@ -16,33 +16,56 @@
 - [x] Execution limits (actions, text length, total characters, duration)
 - [x] Run events and `RunReport`
 - [x] Threaded runner and `AutomationService` facade (GUI never blocks)
-- [x] 115 tests against fake adapters; headless CI on Linux/macOS/Windows
+- [x] Tests against fake adapters; headless CI on Linux/macOS/Windows
 - [x] `ruff` + `mypy --strict` clean, `py.typed` shipped
 
-## Phase 2 — Desktop UI
+## Phase 2 — Desktop UI (done)
 
-- [ ] Target list with refresh, search and a persistent active-target indicator
-- [ ] Action editor (text + action list) backed by the action model
-- [ ] Timing profile controls with live preview of the resulting delays
-- [ ] Start / Pause / Resume / Stop buttons wired to `AutomationService`
-- [ ] Emergency stop: always-visible button, global hotkey, and a hard cap on
-      how long any single action may block
-- [ ] Run log fed by `RunEvent`s, marshalled onto the UI thread via Qt signals
-- [ ] Dry-run preview panel showing `RunReport.performed`
-- [ ] Capability banner showing `PlatformReport` warnings and missing permissions
-- [ ] Countdown before a run starts, so the user can abort
+- [x] Target list with refresh, per-window metadata and a persistent
+      active-target indicator; no silent fallback to the focused window
+- [x] Reason shown when windows cannot be enumerated (Wayland, permissions,
+      missing adapter), and invalid targets flagged before a run starts
+- [x] Action editor: add, edit, delete, reorder, per-action delay override,
+      validation errors surfaced inline
+- [x] Generated per-action forms driven by `ACTION_SPECS`, so a new action type
+      gets an editor without new widget code
+- [x] Timing panel for the full `TimingProfile`, rejecting invalid combinations
+      (for example `min > max`) instead of silently clamping
+- [x] Live timing preview sampled from the real `TimingService`, with an
+      optional fixed seed
+- [x] Start / Pause / Resume / Stop with a visible run state and editing locked
+      while a run is in flight
+- [x] Pre-run countdown on the worker thread, cancellable, activating the target
+      only after it completes
+- [x] Always-visible emergency stop (`Ctrl+.`), enabled in every state, updating
+      the UI without waiting for the worker
+- [x] Global emergency-stop hotkey behind `HotkeyPort`, with honest
+      per-platform support reporting (never fabricated)
+- [x] Dry-run panel: same plan and timing, recording adapters, estimated
+      duration, ordered actions, result
+- [x] Run log fed by `RunEvent`s
+- [x] Worker → Qt thread marshalling through a single `RunEventBridge`, proven
+      by a test that records slot thread identity
+- [x] Capability banner distinguishing available / restricted / denied /
+      unknown / unavailable, never colour-only, never showing unknown as "no"
+- [x] User-facing error messages instead of tracebacks
+- [x] Keyboard-accessible controls, accessible names, explicit tab order
+- [x] Qt tests on the `offscreen` platform; they skip when the `gui` extra is
+      absent, so the suite still runs without Qt
 
 ## Phase 3 — Platform adapters
 
 - [ ] Windows: verify pywinctl handles; consider `pywin32` behind the ports for
       `SetForegroundWindow` edge cases and per-window input
 - [ ] macOS: Accessibility permission prompt and diagnostics; verify activation
-      through the Accessibility APIs
+      through the Accessibility APIs; verify Input Monitoring for the hotkey
 - [ ] Linux/X11: verify enumeration, activation and focus checks under common
       window managers
 - [ ] Wayland: portal-based diagnostics, and a clear, honest "unsupported here"
       path instead of silent failure
 - [ ] Per-key layout handling (non-US keyboard layouts) in the input adapter
+- [ ] Multi-monitor coordinate handling and screen-bounds validation for
+      absolute mouse coordinates
 - [ ] Manual verification checklist per platform (cannot run in CI)
 
 ## Phase 4 — Profiles and persistence
@@ -51,6 +74,7 @@
 - [ ] Save/load/rename profiles, with schema versioning
 - [ ] Optional YAML import/export behind the `[yaml]` extra
 - [ ] Target re-resolution on load (handles change between sessions)
+- [ ] Recent-profile list and unsaved-change prompts in the UI
 
 ## Phase 5 — Packaging and distribution
 
@@ -61,8 +85,8 @@
 ## Phase 6 — Advanced
 
 - [ ] Mouse path interpolation strategies
-- [ ] Global hotkeys for start/stop
-- [ ] Scroll, drag and multi-monitor coordinate support
+- [ ] Configurable global hotkeys beyond the emergency stop
+- [ ] Scroll and drag actions
 - [ ] Recording mode, only behind an explicit user action and a visible indicator
 
 ## Out of scope

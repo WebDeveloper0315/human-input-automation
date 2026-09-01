@@ -16,8 +16,10 @@ ui  ->  application  ->  core  <-  adapters
   capabilities). No platform code, no third-party imports.
 * `adapters/` — implementations of the ports: pynput input, pywinctl windows,
   system clock, null adapters, platform/capability detection.
-* `application/` — orchestration: threaded runner, service facade. Qt-free.
-* `ui/` — PySide6. Talks only to `application`.
+* `application/` — orchestration: threaded runner, countdown, service facade.
+  Qt-free.
+* `ui/` — PySide6 widgets plus a Qt-free presentation layer (`ui/models.py`).
+  Talks only to `application`.
 * `app.py` — the composition root; the only module that wires all layers.
 
 **No platform API may be imported from `core/`.** The engine never sees a
@@ -42,13 +44,25 @@ same name and confuses packaging and analysis tools.
 | `core/handlers.py` | One handler function per built-in action |
 | `core/events.py` | Run events and `RunReport` |
 | `core/dryrun.py` | Recording no-op ports used by dry-run mode |
-| `ports/*` | `KeyboardPort`, `MousePort`, `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe` |
+| `ports/*` | `KeyboardPort`, `MousePort`, `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort` |
 | `adapters/platform_info.py` | Platform/display-server/permission detection |
 | `adapters/pynput_input.py` | Real keyboard and mouse (lazy import) |
 | `adapters/pywinctl_windows.py` | Real window discovery/activation (lazy import) |
 | `adapters/registry.py` | Chooses adapters, degrades to null adapters |
-| `application/runner.py` | Worker thread, event fan-out |
+| `adapters/pynput_hotkey.py` | Global emergency-stop hotkey (lazy import) |
+| `adapters/hotkeys.py` | Hotkey capability reporting and the null hotkey |
+| `application/runner.py` | Worker thread, pre-run countdown, event fan-out |
 | `application/service.py` | Facade used by the UI |
+| `ui/models.py` | **Qt-free** presentation logic: run-state machine, control enablement, capability banner, action/timing forms, log and error formatting |
+| `ui/run_bridge.py` | The single worker-thread → Qt-thread boundary |
+| `ui/main_window.py` | Window assembly and service wiring |
+| `ui/target_panel.py` | Window list, selection, active-target indicator |
+| `ui/action_editor.py` | Action list plus the generated per-action dialog |
+| `ui/timing_panel.py` | Timing profile fields, seed and live preview |
+| `ui/run_controls.py` | Start/Pause/Resume/Stop, countdown and emergency stop |
+| `ui/capability_banner.py` | Persistent capability/permission banner |
+| `ui/dry_run_panel.py` | Dry-run preview |
+| `ui/run_log.py` | Structured run-event log |
 
 ## Action model
 
@@ -150,25 +164,135 @@ restrictions are a deliberate security design, not a defect to work around.
 * **Failure isolation** — a broken event listener or an adapter exception is
   caught, reported as `FAILED`, and never crashes the caller.
 
-## Threading
+## Threading and the Qt boundary
 
 `AutomationEngine.run()` blocks, by design: it is a pure, testable loop.
 `application/runner.py` runs it on a daemon worker thread, which keeps the UI
 thread free to render and - critically - to receive the emergency stop.
 
-Listener callbacks fire **on the worker thread**. A Qt front end must marshal
-them (emit a signal); it must never touch widgets from the listener.
+The **one rule** for the UI is that widgets are touched only on the Qt main
+thread. `ui/run_bridge.py` is the only place the boundary is crossed:
+
+```
+worker thread                     Qt main thread
+-------------                     --------------
+engine emits RunEvent
+   -> RunEventBridge.__call__
+        -> Signal.emit  ── queued ──>  slot _on_run_event
+                                          -> run log, controls, state
+```
+
+`RunEventBridge` is created on the main thread, so `emit` from the worker uses a
+queued connection and every slot runs on the main thread. The pynput hotkey
+listener crosses the same bridge (`notify_hotkey`). Nothing else in `ui/` may be
+called from another thread, and `tests/test_ui_threading.py` asserts it by
+recording the thread identity of every slot invocation during a real run.
+
+The bridge's signal is called `run_event`, not `event`: `QObject.event` is Qt's
+own event handler and must not be shadowed.
+
+## UI architecture
+
+Widgets are thin. Everything that can be decided without Qt lives in
+`ui/models.py`, which imports no GUI toolkit at all:
+
+* `UiState` + `next_state(state, event)` — the run-state machine, folded from
+  run events;
+* `controls_for(state, has_target, has_actions)` — which controls are enabled
+  and whether editing is locked;
+* `capability_banner(...)` — capability level, headline and details;
+* `ACTION_SPECS` — declarative field lists per action type, plus
+  `build_action` / `action_to_values` for conversion to and from domain actions;
+* `TIMING_FIELDS`, `build_timing_profile`, `preview_delays` — timing form and
+  preview;
+* `format_event`, `friendly_error`, `dry_run_view` — log lines, user-facing
+  error text and the dry-run panel content.
+
+That split is why most of the UI is testable without a display, and why adding
+an action type gives it an editor for free: define the dataclass, register a
+handler, add an `ActionSpec`.
+
+### Run lifecycle
+
+```
+IDLE ──start──> STARTING ──> COUNTDOWN ──> RUNNING ──> COMPLETED ─┐
+                    │            │           │  ↑                 │
+                    │            │        PAUSE│  │RESUME         ├─> idle-like
+                    │            │           PAUSED                │   (start
+                    └──stop──────┴──stop──────┴──> STOPPED ────────┤    enabled
+                                             failure ─> FAILED ────┘    again)
+```
+
+The terminal states (`COMPLETED`, `STOPPED`, `FAILED`) enable the same controls
+as `IDLE` while keeping the outcome visible in the status line. While a run is
+active the target list, action editor and timing fields are locked, so the plan
+cannot change under a running engine.
+
+### Pre-run countdown
+
+The countdown is part of the worker thread, not a Qt timer: `AutomationRunner`
+waits on the run's `RunControl` (`wait_for_stop`) and emits `CountdownStarted` /
+`CountdownTick` / `CountdownCancelled`. Consequences that matter:
+
+* the Qt thread never sleeps;
+* stop and emergency stop interrupt the countdown immediately, through the same
+  cancellation path as the rest of a run;
+* **the target is activated only after the countdown ends** - cancelling means
+  no window was touched and no input was sent.
+
+### Emergency stop
+
+* Always visible, never disabled in any state, with an accessible name and the
+  `Ctrl+.` shortcut.
+* Clicking it signals the worker and updates the UI *immediately*; the window
+  never blocks waiting for the thread, and reconciles when the final
+  `RunReport` arrives.
+* Works during the countdown, during a wait, while paused and mid-action, and
+  releases any held keys and mouse buttons through the engine's cleanup.
+* A global hotkey (`Ctrl+Alt+.`) is offered through `ports/hotkeys.py` and the
+  pynput adapter. Where a platform cannot support it - Wayland, or macOS
+  without Input Monitoring permission - the UI says so instead of pretending;
+  the on-screen button is the guaranteed control. The hotkey can only ever
+  stop a run, never start one.
+
+### Dry run
+
+The dry-run button builds the *same* plan and timing profile as a real run and
+hands it to `AutomationService.dry_run`, which swaps in recording ports and a
+virtual clock. Nothing can reach the desktop, the call returns immediately, and
+the panel shows the target, the ordered actions, sampled delays, the estimated
+duration and the outcome under a "DRY RUN - NO INPUT WILL BE SENT" header. The
+execution algorithm is not duplicated anywhere in the UI.
+
+### Capability display
+
+The banner distinguishes five levels - `AVAILABLE`, `RESTRICTED`, `DENIED`,
+`UNKNOWN`, `UNAVAILABLE` - and renders each with a word (`OK`, `LIMITED`,
+`DENIED`, `UNKNOWN`, `UNAVAILABLE`) as well as a symbol, so status is never
+carried by colour alone. `UNKNOWN` is a distinct level on purpose and is never
+displayed as "no". The target panel shows the *reason* it cannot list windows
+(Wayland restrictions, a missing macOS permission, an unavailable adapter)
+rather than an empty list.
 
 ## Testing strategy
 
 Everything above the adapters is tested with fakes (`tests/fakes.py`):
-`FakeKeyboard`, `FakeMouse`, `FakeWindows`, and a `FakeClock` whose virtual time
-advances instantly. A hook on the fake clock triggers stop requests at an exact
-point in a run, so cancellation is tested deterministically without sleeping.
+`FakeKeyboard`, `FakeMouse`, `FakeWindows`, `FakeHotkey`, and a `FakeClock`
+whose virtual time advances instantly. A hook on the fake clock triggers stop
+requests at an exact point in a run, so cancellation is tested deterministically
+without sleeping.
 
-CI therefore needs no desktop on any platform. The pynput and pywinctl adapters
-are thin, lazily imported, and left to manual/Phase 3 verification on real
-hardware.
+The UI is tested at two levels:
+
+* `ui/models.py` is pure Python, so its tests need no Qt at all;
+* widget and main-window tests run on Qt's `offscreen` platform plugin
+  (`QT_QPA_PLATFORM=offscreen`, set in `tests/conftest.py`), driving the real
+  service, runner and engine against fake adapters.
+
+Without the `gui` extra installed the three Qt modules skip themselves, so the
+suite still runs on a machine that has no Qt at all. CI therefore needs no
+desktop on any platform. The pynput and pywinctl adapters are thin, lazily
+imported, and left to manual/Phase 3 verification on real hardware.
 
 ## Dependency decisions
 

@@ -7,22 +7,47 @@ the desktop GUI, a future CLI and the tests.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 
+from ..adapters.hotkeys import HotkeySupport
 from ..adapters.registry import AdapterSet, build_adapters
+from ..core.control import RunState
 from ..core.engine import AutomationEngine
 from ..core.errors import ValidationResult
 from ..core.events import EventListener, RunReport
 from ..core.plan import AutomationPlan
-from ..core.target import PlatformReport, TargetWindow
+from ..core.target import DisplayServer, PlatformName, PlatformReport, TargetWindow
 from ..core.validation import validate_plan
+from ..ports.hotkeys import HotkeyPort
 from .runner import AutomationRunner
+
+
+@dataclass(frozen=True)
+class TargetListing:
+    """Result of a target refresh, including why it may be empty.
+
+    The UI needs the reason: "no windows found" and "this platform will not tell
+    us about windows" are very different messages.
+    """
+
+    targets: tuple[TargetWindow, ...] = ()
+    reason: str | None = None
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.targets
 
 
 class AutomationService:
     """Facade over adapters, engine and runner."""
 
-    def __init__(self, adapters: AdapterSet | None = None) -> None:
+    def __init__(
+        self,
+        adapters: AdapterSet | None = None,
+        *,
+        countdown_tick_seconds: float = 1.0,
+    ) -> None:
         self._adapters = adapters or build_adapters()
         self._engine = AutomationEngine(
             keyboard=self._adapters.keyboard,
@@ -30,7 +55,7 @@ class AutomationService:
             clock=self._adapters.clock,
             windows=self._adapters.windows,
         )
-        self._runner = AutomationRunner(self._engine)
+        self._runner = AutomationRunner(self._engine, tick_seconds=countdown_tick_seconds)
 
     # -- host / targets ----------------------------------------------------
     @property
@@ -45,10 +70,50 @@ class AutomationService:
 
     def list_targets(self) -> Sequence[TargetWindow]:
         """Windows the user can select as a target (empty when unsupported)."""
+        return self.discover_targets().targets
+
+    def discover_targets(self) -> TargetListing:
+        """Enumerate windows, explaining the outcome when nothing is available."""
         discovery = self._adapters.discovery
-        if discovery is None:
-            return ()
-        return discovery.list_windows()
+        if discovery is None or not self.host.capabilities.can_enumerate:
+            return TargetListing((), self._enumeration_reason())
+        try:
+            targets = tuple(discovery.list_windows())
+        except Exception as exc:  # adapters must never crash the UI
+            return TargetListing((), f"Window discovery failed: {exc}")
+        if not targets:
+            return TargetListing((), "No windows were reported by the platform adapter.")
+        return TargetListing(targets)
+
+    def _enumeration_reason(self) -> str:
+        if self.host.display_server is DisplayServer.WAYLAND:
+            return (
+                "Wayland does not let applications enumerate other windows. "
+                "Focus the target manually, or run this application under X11."
+            )
+        if self.host.platform is PlatformName.MACOS and self.host.missing_permissions:
+            return (
+                "macOS Accessibility permission is required before windows can be listed. "
+                "See the capability banner for details."
+            )
+        for problem in self.problems:
+            if "pywinctl" in problem:
+                return problem
+        return "This platform or adapter cannot enumerate windows."
+
+    def refresh_target(self, target: TargetWindow) -> TargetWindow | None:
+        """Re-resolve a target by handle; ``None`` means it is gone.
+
+        Titles change while an application runs, so the handle is what is
+        matched - never the title.
+        """
+        discovery = self._adapters.discovery
+        if discovery is None or target.is_focused_window:
+            return target
+        try:
+            return discovery.find(target.handle)
+        except Exception:
+            return None
 
     def focused_window_target(self) -> TargetWindow:
         """Fallback target for platforms without window control (e.g. Wayland)."""
@@ -71,8 +136,17 @@ class AutomationService:
         """
         return self._engine.run(plan.as_dry_run(), host=self.host)
 
-    def start(self, plan: AutomationPlan, listener: EventListener | None = None) -> None:
-        self._runner.start(plan, listener, host=self.host)
+    def start(
+        self,
+        plan: AutomationPlan,
+        listener: EventListener | None = None,
+        *,
+        countdown_seconds: float = 0.0,
+    ) -> None:
+        """Run ``plan`` on a worker thread after an optional countdown."""
+        self._runner.start(
+            plan, listener, host=self.host, countdown_seconds=countdown_seconds
+        )
 
     def pause(self) -> None:
         self._runner.pause()
@@ -86,9 +160,41 @@ class AutomationService:
     def emergency_stop(self) -> None:
         self._runner.emergency_stop()
 
+    # -- global hotkey -----------------------------------------------------
+    @property
+    def hotkey(self) -> HotkeyPort:
+        return self._adapters.hotkey
+
+    @property
+    def hotkey_support(self) -> HotkeySupport:
+        """Whether a global emergency-stop hotkey can work here."""
+        return self._adapters.hotkey_support
+
+    def enable_emergency_hotkey(self, on_trigger: Callable[[], None] | None = None) -> bool:
+        """Register the global emergency-stop hotkey. Returns False if refused.
+
+        The hotkey only ever stops a run; it can never start one. ``on_trigger``
+        is invoked *in addition to* the stop, from the listener's thread, so a
+        GUI can marshal a notification onto its own thread.
+        """
+
+        def trigger() -> None:
+            self.emergency_stop()
+            if on_trigger is not None:
+                on_trigger()
+
+        return self._adapters.hotkey.start(trigger)
+
+    def disable_emergency_hotkey(self) -> None:
+        self._adapters.hotkey.stop()
+
     @property
     def is_running(self) -> bool:
         return self._runner.is_running
+
+    @property
+    def state(self) -> RunState:
+        return self._runner.state
 
     @property
     def last_report(self) -> RunReport | None:

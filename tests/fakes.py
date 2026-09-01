@@ -146,3 +146,36 @@ def make_target(
         process_id=4242,
         capabilities=capabilities or WindowCapabilities.full(),
     )
+
+
+@dataclass
+class FakeHotkey:
+    """Hotkey port that records registration and can be fired by a test."""
+
+    description_text: str = "Ctrl+Alt+."
+    can_register: bool = True
+    callback: Callable[[], None] | None = None
+    stopped: bool = False
+
+    @property
+    def description(self) -> str:
+        return self.description_text
+
+    @property
+    def is_active(self) -> bool:
+        return self.callback is not None and not self.stopped
+
+    def start(self, on_trigger: Callable[[], None]) -> bool:
+        if not self.can_register:
+            return False
+        self.callback = on_trigger
+        self.stopped = False
+        return True
+
+    def stop(self) -> None:
+        self.stopped = True
+
+    def trigger(self) -> None:
+        """Simulate the hotkey firing from the listener's own thread."""
+        if self.callback is not None:
+            self.callback()
