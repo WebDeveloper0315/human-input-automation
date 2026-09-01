@@ -145,12 +145,35 @@ Still open:
 - [ ] macOS signing and notarisation (needs a Developer ID)
 - [ ] Clean-machine installation test on each platform
 
-## Phase 6 — Advanced
+## Phase 6 — Real-platform verification (done for Linux/X11)
 
-- [ ] Mouse path interpolation strategies
-- [ ] Configurable global hotkeys beyond the emergency stop
-- [ ] Scroll and drag actions
-- [ ] Recording mode, only behind an explicit user action and a visible indicator
+- [x] Verification harness (`tools/platform_verify/`): safe target application,
+      minimal EWMH window manager, driver, isolated-session launcher
+- [x] Real input executed against a real X server: text, named keys, modifier
+      chords, mouse movement, duration, clicks
+- [x] The critical activation test — decoy focused, input reached the target
+      only
+- [x] Emergency stop verified for wait, held key, held button, paused run and
+      the global hotkey; held keys proven released
+- [x] Measured timing compared against the configured bounds
+- [x] Safety matrix verified: missing / blocked / unresolved target and dry run
+      all produce zero input
+- [x] Profile save → restart → re-resolve → run verified with real input
+- [x] Adapter lifecycle: no leaked threads or X connections
+- [x] Three real bugs found and fixed, each with regression tests
+      (activation race, wrong screen geometry, unusable default hotkey)
+- [x] Isolated verification runs in CI on every push
+
+Still open — these need physical machines:
+
+- [ ] Windows: build the artifact, then run the manual checklist
+- [ ] macOS: build the artifact, grant Accessibility and Input Monitoring,
+      then run the manual checklist
+- [ ] A real X11 desktop session (GNOME/KDE/i3), not just a bare X server
+- [ ] Non-US keyboard layouts
+- [ ] Display scaling other than 100%, and macOS Retina coordinates
+
+## Phase 7 — Advanced
 
 ## Out of scope
 

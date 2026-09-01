@@ -18,7 +18,7 @@ class HotkeyPort(Protocol):
 
     @property
     def description(self) -> str:
-        """Human-readable combination, e.g. ``Ctrl+Alt+.``."""
+        """Human-readable combination, e.g. ``Ctrl+Shift+F9``."""
         ...
 
     @property

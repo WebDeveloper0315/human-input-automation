@@ -66,10 +66,18 @@ class PyMonCtlScreens:
             return ScreenGeometry.unknown("the platform reported no monitors")
 
         infos: list[MonitorInfo] = []
+        seen: set[tuple[str, int, int, int, int]] = set()
         for index, monitor in enumerate(monitors):
             info = self._to_info(monitor, is_first=index == 0)
-            if info is not None:
-                infos.append(info)
+            if info is None:
+                continue
+            # pymonctl can report the same monitor several times; a duplicate
+            # entry is never meaningful and would distort the desktop bounds.
+            key = (info.name, info.x, info.y, info.width, info.height)
+            if key in seen:
+                continue
+            seen.add(key)
+            infos.append(info)
         if not infos:
             return ScreenGeometry.unknown("monitor details could not be read")
         return ScreenGeometry(

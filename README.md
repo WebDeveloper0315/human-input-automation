@@ -3,10 +3,11 @@
 Cross-platform desktop automation for keyboard and mouse input, inspired by
 AutoIt. Windows, macOS and Ubuntu/Linux.
 
-**Status:** Phase 5 — installable builds for Windows, macOS and Linux, on top of
-the automation core, desktop UI, capability model and saved profiles. **Real
-end-to-end input has still not been verified on any platform**; see
-"Implemented, packaged, verified" below.
+**Status:** Phase 6 — real input, window activation, emergency stop and profile
+re-resolution are now **verified against a real X server**; three genuine bugs
+were found and fixed doing it. Windows, macOS and real desktop sessions remain
+unverified. See "Implemented, packaged, verified" below and
+`docs/PHASE6-REAL-PLATFORM-REPORT.md`.
 
 ## What it does
 
@@ -18,7 +19,7 @@ end-to-end input has still not been verified on any platform**; see
   pauses, action delays, mouse movement duration, optional fixed seed — with a
   live preview sampled from the same timing service the engine uses
 - Start / Pause / Resume / Stop, a cancellable pre-run countdown, and an
-  always-visible emergency stop (`Ctrl+.`, plus a global `Ctrl+Alt+.` hotkey
+  always-visible emergency stop (`Ctrl+.`, plus a global `Ctrl+Shift+F9` hotkey
   where the platform allows it)
 - Dry-run preview that reports every action and the estimated duration without
   sending any input
@@ -229,30 +230,32 @@ is never shown as "no".
 
 These are different claims, and the project keeps them apart:
 
-* **Implemented** — the code path exists and is unit tested.
+* **Implemented** — the code path exists and is unit tested against fakes.
 * **Packaged** — a distributable artifact is produced.
-* **Smoke-tested** — the artifact launches, opens its window and stores a
-  profile. No input was sent.
-* **Platform-verified** — real keyboard, mouse and window behaviour was
-  executed on that platform by a person.
+* **Smoke-tested** — the artifact launches, opens its window, stores a profile.
+* **Verified** — real keyboard, mouse and window behaviour was executed and
+  observed on that platform.
 
-| Platform | Implemented | Packaged | Artifact built | Smoke-tested | Real input verified |
-| --- | --- | --- | --- | --- | --- |
-| Linux (Wayland + XWayland) | yes | yes | **yes** | **yes** | **no** |
-| Linux X11 | yes | yes | yes (same artifact) | no | **no** |
-| Windows | yes | yes | **no** | no | **no** |
-| macOS | yes | yes | **no** | no | **no** |
+| Platform | Package | Window control | Keyboard | Mouse | Global hotkey | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| Linux/X11 | AppImage | Verified | Verified | Verified | Verified | **Partially verified** — isolated X server, not a real desktop |
+| Linux/Wayland | AppImage | Restricted by OS | Restricted by OS | Restricted by OS | Unavailable by OS | **Restricted** — reported, not worked around |
+| Windows | Installer + zip (not built) | Implemented but unverified | Implemented but unverified | Implemented but unverified | Implemented but unverified | **Implemented but unverified** |
+| macOS | DMG (not built) | Implemented but unverified | Implemented but unverified | Implemented but unverified | Implemented but unverified | **Implemented but unverified** |
 
-Only the Linux AppImage has actually been built and run — on Ubuntu 26.04
-GNOME/Wayland, where it launches, loads the real Qt platform plugin from inside
-the bundle, and round-trips a profile. The Windows and macOS build
-configurations exist and are reviewed but have never been executed, because no
-such machine was available.
+What "verified" covers on Linux/X11: typed text, named keys and a modifier chord
+arriving intact; mouse movement landing exactly and taking the requested time;
+**input reaching the intended window while a decoy window held focus**;
+emergency stop in 1 ms with held keys released; the global hotkey stopping a run
+in 195 ms; timing measured inside its configured bounds; and a profile surviving
+a restart and re-resolving by application identity. 51 checks, 0 failures — run
+on every push by CI. The window manager was a minimal one written for the
+harness, so this is not yet evidence about GNOME, KDE or i3.
 
 No synthetic keyboard or mouse input has been executed on **any** platform.
-`docs/PHASE3-PLATFORM-REPORT.md` records exactly what was run;
-`docs/RELEASE-CHECKLIST.md` is the procedure for verifying a platform you do
-have.
+`docs/PHASE6-REAL-PLATFORM-REPORT.md` records exactly what was run and the three
+bugs it found; `docs/RELEASE-CHECKLIST.md` is the procedure for verifying a
+platform you do have.
 
 `docs/PHASE3-PLATFORM-REPORT.md` records exactly what was run, what was found
 (including two real library defects), and a manual checklist for verifying a
@@ -289,7 +292,7 @@ Behaviour on scaled displays (Windows 150%, macOS Retina) is unverified.
 ## Development
 
 ```bash
-pytest                                     # 672 tests with the gui extra, 565 without
+pytest                                     # 698 tests with the gui extra, 591 without
 pytest -m manual                           # host-dependent checks, opt-in
 ruff check .
 mypy src
@@ -299,6 +302,7 @@ python -m human_input_automation --diagnose
 python -m human_input_automation --profiles
 python -m human_input_automation --smoke-test   # starts the UI, stores a profile, no input
 python packaging/build.py                       # build and verify this platform's artifact
+tools/platform_verify/run_x11_session.sh /tmp/v python   # real-input verification (isolated X server)
 ```
 
 Qt tests use the `offscreen` platform plugin (set automatically in

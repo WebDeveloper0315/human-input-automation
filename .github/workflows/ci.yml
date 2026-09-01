@@ -47,6 +47,32 @@ jobs:
       - run: pip install -e ".[dev,gui]"
       - run: pytest
 
+  # Real adapters, real X server, real input - on a private display that exists
+  # only for the duration of the job. This is the one desktop-automation
+  # scenario a hosted runner can genuinely test; Windows, macOS and real
+  # desktop sessions stay in the manual checklist.
+  verify-x11:
+    name: real-input verification (Xvfb)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: X server and Qt runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends             xvfb libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libfontconfig1             libglib2.0-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1             libxcb-shape0 libxcb-xkb1 libxkbcommon0
+      - run: pip install -e ".[dev,desktop]"
+      - name: verify the real adapters against an isolated X server
+        run: tools/platform_verify/run_x11_session.sh "${{ runner.temp }}/verify" python
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: x11-verification-report
+          path: ${{ runner.temp }}/verify/report.json
+          if-no-files-found: warn
+
   quality:
     name: ruff + mypy
     runs-on: ubuntu-latest

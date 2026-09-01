@@ -8,6 +8,59 @@ The application version and the profile schema version are independent: this
 release is 0.6.0 and writes profile **schema 1**, and a later application
 version may still write schema 1.
 
+## [0.7.0] - 2026-09-02
+
+Real-platform verification: the adapters were finally run against a real X
+server instead of fakes, and three genuine bugs came out of it.
+
+### Added
+
+- Platform verification harness (`tools/platform_verify/`): a safe target
+  application that records the input it receives, a minimal EWMH window manager
+  for bare X servers, a driver that runs 51 checks, and an isolated-session
+  launcher. It types only into its own target and always dry-runs first.
+- `adapters/x11_screens.py`: monitor layout read from RandR, which is
+  authoritative for the display actually connected to.
+- `problematic_combination()`: warns about global-hotkey shapes that pynput was
+  measured never to match.
+- CI job `verify-x11`: the real-input verification runs on every push against a
+  private X server, so this configuration cannot silently regress.
+- `docs/PHASE6-REAL-PLATFORM-REPORT.md` with the full evidence.
+
+### Changed
+
+- **The default emergency hotkey is now `Ctrl+Shift+F9`** (was `Ctrl+Alt+.`).
+  Measured against a real X server, pynput never fires for combinations holding
+  Ctrl and Alt together, nor for character keys once a modifier is held - the
+  old default was both, so it could never have worked.
+- Linux reads its monitor layout from RandR rather than pymonctl.
+- `PynputHotkey.start()` waits for the listener backend to be ready, so a
+  hotkey that failed asynchronously is reported as not registered instead of
+  appearing active.
+
+### Fixed
+
+- **Window activation reported false failures.** Activation is a request to the
+  window manager, which acts asynchronously; the adapter read the focus property
+  immediately afterwards and saw the previous window. It now waits, bounded, for
+  the request to be honoured.
+- **Screen geometry could describe the wrong display.** pymonctl returned
+  duplicated monitors plus monitors belonging to another display - a 1024×768
+  screen was reported as a 3840×1080 desktop, which would have let coordinate
+  validation accept points that are nowhere on screen.
+- Duplicate monitors are collapsed on the platforms still using pymonctl.
+
+### Known limitations
+
+- Windows and macOS remain **entirely unverified**: no artifact has been built
+  or run, and no permission has ever been granted or denied.
+- Linux/X11 was verified against an isolated X server with a minimal window
+  manager written for the harness - not GNOME, KDE or i3.
+- No input has ever been injected into a Wayland session; its restrictions are
+  reported, not worked around.
+- Non-US keyboard layouts, display scaling above 100% and macOS Retina
+  coordinates are all untested.
+
 ## [0.6.0] - 2026-09-01
 
 First distributable release: the application can now be installed on a machine

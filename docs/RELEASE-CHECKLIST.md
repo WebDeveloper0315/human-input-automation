@@ -15,6 +15,21 @@ Used throughout the documentation, and never collapsed into "supported":
 | **Smoke-tested** | The artifact launches, opens its window and stores a profile. No input was sent. |
 | **Platform-verified** | Real keyboard, mouse and window behaviour was executed on that platform by a person. |
 
+## Automated verification first
+
+Before any manual testing, run the harness - it covers a large part of the
+checklist automatically and needs no desktop session:
+
+```bash
+tools/platform_verify/run_x11_session.sh /tmp/verify python
+```
+
+51 checks including real typing, activation against a decoy window, emergency
+stop and profile re-resolution. It runs on an isolated X server, so it cannot
+touch your desktop. See `tools/platform_verify/README.md`. The manual checklist
+below still matters: the harness uses a minimal window manager, and says nothing
+about Windows, macOS or a real desktop session.
+
 ## Before tagging
 
 - [ ] `pytest`, `ruff check .`, `mypy src`, `mypy src tests` all pass
@@ -23,6 +38,7 @@ Used throughout the documentation, and never collapsed into "supported":
 - [ ] `CHANGELOG.md` has an entry for the version, including known limitations
 - [ ] The version in `pyproject.toml` matches `__init__.py` (a test enforces this)
 - [ ] `python packaging/build.py` succeeds locally on at least one platform
+- [ ] `tools/platform_verify/run_x11_session.sh` reports 0 failures
 
 ## Tagging
 
@@ -97,7 +113,7 @@ run.**
 - [ ] Mouse: absolute move, movement duration (set 2000 ms — it should visibly
       take ~2 s), left/right/middle click, down/up drag
 - [ ] Emergency stop during a long wait, and during a movement
-- [ ] Global hotkey `Ctrl+Alt+.` stops a run
+- [ ] Global hotkey `Ctrl+Shift+F9` stops a run
 - [ ] After any stop: no stuck modifier, no stuck mouse button
 - [ ] Profile save, load, and reload after restarting the application
 - [ ] Uninstall removes the application and **keeps** `%APPDATA%\human-input-automation`

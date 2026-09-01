@@ -32,7 +32,14 @@ class FakeProperty:
 
 
 class FakeWindow:
-    def __init__(self, title: str, pid: int | None, wm_class: tuple[str, ...] | None) -> None:
+    def __init__(
+        self,
+        title: str,
+        pid: int | None,
+        wm_class: tuple[str, ...] | None,
+        window_id: int = 0,
+    ) -> None:
+        self.id = window_id  # real Xlib window objects carry their id
         self.title = title
         self.pid = pid
         self.wm_class = wm_class
@@ -287,3 +294,83 @@ def test_focus_is_unknown_when_no_active_window_is_reported() -> None:
 def test_close_is_safe_even_when_the_display_errors() -> None:
     adapter = X11Windows(host(), BrokenDisplay(), FAKE_XLIB)
     adapter.close()  # must not raise
+
+
+# -- activation is asynchronous -------------------------------------------
+class SlowRoot(FakeRoot):
+    """A root window whose focus property lags behind the activation request.
+
+    Real window managers are asynchronous: activation is a message they handle
+    on their own schedule, so `_NET_ACTIVE_WINDOW` read immediately afterwards
+    can still report the previous focus.
+    """
+
+    def __init__(self, client_ids: list[int], active: int, lag: int) -> None:
+        super().__init__(client_ids, active)
+        self.lag = lag
+        self.requested: int | None = None
+
+    def send_event(self, event: Any, event_mask: Any = 0) -> None:
+        self.events.append(event)
+        self.requested = getattr(event.window, "id", None)
+
+    def get_full_property(self, atom: str, kind: Any) -> FakeProperty | None:
+        if atom == "_NET_ACTIVE_WINDOW" and self.requested is not None:
+            if self.lag > 0:
+                self.lag -= 1
+            else:
+                self.active = self.requested
+                self.requested = None
+        return super().get_full_property(atom, kind)
+
+
+class SlowDisplay(FakeDisplay):
+    def __init__(self, windows: dict[int, FakeWindow], active: int, lag: int) -> None:
+        super().__init__(windows, active=active)
+        self.root = SlowRoot(list(windows), active, lag)
+
+
+def test_activation_waits_for_the_window_manager_to_act() -> None:
+    """Regression: an immediate focus check reported false activation failures.
+
+    Found on a real X server during Phase 6 verification - the activation had
+    worked, but the check ran before the window manager had processed it.
+    """
+    display = SlowDisplay(
+        {
+            0x01: FakeWindow("Target", 100, ("app", "app"), window_id=0x01),
+            0x02: FakeWindow("Other", 200, ("other", "other"), window_id=0x02),
+        },
+        active=0x02,
+        lag=3,
+    )
+    adapter = X11Windows(host(), display, FAKE_XLIB, activation_timeout=2.0)
+    target = adapter.find("0x00000001")
+    assert target is not None
+    assert adapter.activate(target) is True
+    assert display.root.active == 0x01
+
+
+def test_activation_gives_up_when_focus_never_arrives() -> None:
+    """A window manager that ignores the request must not be called a success."""
+    display = FakeDisplay(
+        {0x01: FakeWindow("Target", 100, ("app", "app"), window_id=0x01)}, active=0x99
+    )
+    adapter = X11Windows(host(), display, FAKE_XLIB, activation_timeout=0.05)
+    target = adapter.find("0x00000001")
+    assert target is not None
+    assert adapter.activate(target) is False
+
+
+def test_activation_succeeds_when_focus_cannot_be_verified() -> None:
+    """Unknown is not failure: the engine applies its own policy for that."""
+    display = FakeDisplay({0x01: FakeWindow("Target", 100, ("app", "app"))}, active=None)
+    adapter = X11Windows(
+        host(verify_state=CapabilityState.UNAVAILABLE),
+        display,
+        FAKE_XLIB,
+        activation_timeout=0.05,
+    )
+    target = adapter.find("0x00000001")
+    assert target is not None
+    assert adapter.activate(target) is True

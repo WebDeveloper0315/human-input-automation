@@ -159,7 +159,7 @@ def make_target(
 class FakeHotkey:
     """Hotkey port that records registration and can be fired by a test."""
 
-    description_text: str = "Ctrl+Alt+."
+    description_text: str = "Ctrl+Shift+F9"
     can_register: bool = True
     callback: Callable[[], None] | None = None
     stopped: bool = False

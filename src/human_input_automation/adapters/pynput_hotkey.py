@@ -12,7 +12,11 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from .hotkeys import DEFAULT_EMERGENCY_HOTKEY, DEFAULT_EMERGENCY_HOTKEY_LABEL
+from .hotkeys import (
+    DEFAULT_EMERGENCY_HOTKEY,
+    DEFAULT_EMERGENCY_HOTKEY_LABEL,
+    problematic_combination,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,10 +51,18 @@ class PynputHotkey:
             listener = keyboard.GlobalHotKeys({self._combination: on_trigger})
             listener.daemon = True
             listener.start()
+            # start() only spawns the thread; wait() blocks until the backend is
+            # actually listening and re-raises whatever went wrong. Without it a
+            # listener that failed asynchronously would be reported as active.
+            listener.wait()
         except Exception as exc:  # no display, no permission, unsupported platform
             logger.info("global hotkey unavailable: %s", exc)
             self._listener = None
             return False
+
+        problem = problematic_combination(self._combination)
+        if problem is not None:
+            logger.warning("the hotkey %s may not fire: %s", self._label, problem)
         self._listener = listener
         return True
 

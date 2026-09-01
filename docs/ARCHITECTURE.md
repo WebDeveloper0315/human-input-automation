@@ -417,7 +417,7 @@ waits on the run's `RunControl` (`wait_for_stop`) and emits `CountdownStarted` /
   `RunReport` arrives.
 * Works during the countdown, during a wait, while paused and mid-action, and
   releases any held keys and mouse buttons through the engine's cleanup.
-* A global hotkey (`Ctrl+Alt+.`) is offered through `ports/hotkeys.py` and the
+* A global hotkey (`Ctrl+Shift+F9`) is offered through `ports/hotkeys.py` and the
   pynput adapter. Where a platform cannot support it - Wayland, or macOS
   without Input Monitoring permission - the UI says so instead of pretending;
   the on-screen button is the guaranteed control. The hotkey can only ever

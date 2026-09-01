@@ -151,3 +151,48 @@ def test_support_is_described_for_every_platform(platform: PlatformName) -> None
     support = describe_hotkey_support(host(platform))
     assert support.reason
     assert support.available in (True, False, None)
+
+
+# -- combination shapes that pynput does not match ------------------------
+def test_the_default_combination_avoids_the_shapes_that_never_fire() -> None:
+    """Regression: the previous default, Ctrl+Alt+., could never fire.
+
+    Measured against a real X server in Phase 6: combinations holding Ctrl and
+    Alt together never fire, and character keys do not match once a modifier is
+    held. The old default did both.
+    """
+    from human_input_automation.adapters.hotkeys import (
+        DEFAULT_EMERGENCY_HOTKEY,
+        problematic_combination,
+    )
+
+    assert problematic_combination(DEFAULT_EMERGENCY_HOTKEY) is None
+
+
+@pytest.mark.parametrize(
+    "combination", ["<ctrl>+<alt>+.", "<ctrl>+<alt>+q", "<ctrl>+<alt>+<f9>", "<alt>+<ctrl>+<f10>"]
+)
+def test_ctrl_alt_combinations_are_flagged(combination: str) -> None:
+    from human_input_automation.adapters.hotkeys import problematic_combination
+
+    problem = problematic_combination(combination)
+    assert problem is not None and "Ctrl and Alt" in problem
+
+
+@pytest.mark.parametrize("combination", ["<ctrl>+.", "<shift>+q", "<ctrl>+<shift>+p"])
+def test_character_key_combinations_are_flagged(combination: str) -> None:
+    from human_input_automation.adapters.hotkeys import problematic_combination
+
+    problem = problematic_combination(combination)
+    assert problem is not None and "character keys" in problem
+
+
+@pytest.mark.parametrize(
+    "combination",
+    ["<ctrl>+<shift>+<f9>", "<ctrl>+<f9>", "<alt>+<f9>", "<shift>+<f10>", "<f9>"],
+)
+def test_verified_working_shapes_are_not_flagged(combination: str) -> None:
+    """These fired reliably against a real X server."""
+    from human_input_automation.adapters.hotkeys import problematic_combination
+
+    assert problematic_combination(combination) is None

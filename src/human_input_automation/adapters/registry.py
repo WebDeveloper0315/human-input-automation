@@ -118,6 +118,24 @@ def build_hotkey_adapter() -> HotkeyPort:
     return PynputHotkey()
 
 
+def build_screen_adapter(host: PlatformReport) -> ScreenPort:
+    """Pick the monitor-layout source for this host.
+
+    X11 reads RandR directly: it is authoritative for the display we are
+    connected to, whereas pymonctl was observed returning duplicated monitors
+    and monitors belonging to a different display. Windows and macOS keep
+    pymonctl, which is the only cross-platform option available there.
+    """
+    if host.platform is PlatformName.LINUX and host.display_server in (
+        DisplayServer.X11,
+        DisplayServer.WAYLAND,
+    ):
+        from .x11_screens import X11Screens
+
+        return X11Screens()
+    return PyMonCtlScreens(host.platform)
+
+
 def build_adapters(*, allow_desktop: bool = True) -> AdapterSet:
     """Best-effort wiring of every adapter for the current host."""
     host = describe_host()
@@ -148,7 +166,10 @@ def build_adapters(*, allow_desktop: bool = True) -> AdapterSet:
             problems.append(str(exc))
             fallback = NullWindowBackend()
             windows, discovery = fallback, fallback
-        screens = PyMonCtlScreens(host.platform)
+        try:
+            screens = build_screen_adapter(host)
+        except AdapterUnavailableError as exc:
+            problems.append(str(exc))
         if not hotkey_support.is_known_unsupported:
             try:
                 hotkey = build_hotkey_adapter()

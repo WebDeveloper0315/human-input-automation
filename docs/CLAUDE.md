@@ -98,6 +98,23 @@ ui -> application -> core <- adapters, with ports/ between core and adapters
   `docs/PHASE3-PLATFORM-REPORT.md`.
 * Never log automated text or profile contents.
 
+## Verification rules
+
+* Fake adapters are never evidence of real OS behaviour. Only
+  `tools/platform_verify/` results, or a manual run, can move a platform from
+  "implemented" to "verified".
+* Real input is generated in exactly one place outside the app: the harness.
+  It types only into its own target, dry-runs first, and never runs a
+  destructive action.
+* Never inject input into someone's live desktop to test something. Use the
+  isolated X server (`run_x11_session.sh`).
+* Every bug found on a real platform gets a regression test against fakes, so
+  the deterministic suite keeps catching it.
+* Record what was executed in `docs/PHASE6-REAL-PLATFORM-REPORT.md`, and never
+  turn a NOT TESTED into a PASS without running it.
+* When a third-party library cannot do something, expose it through the
+  capability system and say so - do not build a fragile workaround.
+
 ## Invariants
 
 * Never send input before the target is activated and focus is checked.

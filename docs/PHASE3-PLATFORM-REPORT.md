@@ -1,5 +1,9 @@
 # Phase 3 — Platform verification report
 
+> **Superseded in part.** Phase 6 executed real input against a real X server
+> and found three bugs; see `docs/PHASE6-REAL-PLATFORM-REPORT.md` for what is
+> now verified. This document remains the record of what Phase 3 established.
+
 This document records what was **actually executed**, on what, and what was
 not. It is deliberately conservative: a capability is only marked `PASS` if a
 test was run and observed. Everything else is `NOT TESTED`, `RESTRICTED` or
@@ -246,7 +250,7 @@ python -m human_input_automation                # the GUI
    logical pixels.
 9. **Emergency stop** — trigger it during the countdown, during a long wait,
    during a long movement, and while paused. Confirm held keys are released.
-10. **Global hotkey** — press `Ctrl+Alt+.` during a run. On macOS confirm the
+10. **Global hotkey** — press `Ctrl+Shift+F9` during a run. On macOS confirm the
     Input Monitoring prompt appears and that the hotkey works only after it is
     granted *and* the app is restarted.
 

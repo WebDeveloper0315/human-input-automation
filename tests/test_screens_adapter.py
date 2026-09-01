@@ -93,3 +93,16 @@ def test_missing_pymonctl_is_unknown_geometry() -> None:
 
 def test_null_screens_reports_its_reason() -> None:
     assert "no screen adapter" in NullScreens().geometry().reason
+
+
+def test_duplicate_monitors_are_collapsed() -> None:
+    """pymonctl was observed reporting the same monitor several times."""
+    duplicate = monitor("HDMI-2", 0, 0, 1920, 1080, primary=True)
+    adapter = PyMonCtlScreens(
+        PlatformName.WINDOWS,
+        module(duplicate, monitor("HDMI-2", 0, 0, 1920, 1080, primary=True),
+               monitor("DP-1", 1920, 0, 1920, 1080)),
+    )
+    geometry = adapter.geometry()
+    assert [m.name for m in geometry.monitors] == ["HDMI-2", "DP-1"]
+    assert geometry.virtual_bounds() == (0, 0, 3840, 1080)

@@ -22,12 +22,22 @@ without an X server.
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any
 
 from ..core.errors import AdapterUnavailableError
 from ..core.target import PlatformReport, TargetWindow
+
+#: How long to wait for the window manager to act on an activation request.
+#: Activation is asynchronous - the request is a message to the window manager,
+#: which processes it on its own schedule - so reading `_NET_ACTIVE_WINDOW`
+#: immediately afterwards can observe the previous focus and wrongly report
+#: failure. Verified against a real X server: a single immediate check fails
+#: intermittently, a short bounded wait does not.
+ACTIVATION_TIMEOUT_SECONDS = 1.0
+ACTIVATION_POLL_SECONDS = 0.02
 
 _ANY_PROPERTY_TYPE = 0
 _NET_CLIENT_LIST = "_NET_CLIENT_LIST"
@@ -64,10 +74,12 @@ class X11Windows:
         host: PlatformReport,
         display: Any | None = None,
         xlib: Any | None = None,
+        activation_timeout: float = ACTIVATION_TIMEOUT_SECONDS,
     ) -> None:
         self._host = host
         self._display = display if display is not None else open_display()
         self._xlib = xlib
+        self._activation_timeout = activation_timeout
 
     def _load_xlib(self) -> Any | None:
         """The ``Xlib`` constants and protocol module, injectable for tests."""
@@ -137,7 +149,24 @@ class X11Windows:
             self._display.sync()
         except Exception:
             return False
-        return self.is_active(target) is not False
+        return self._await_focus(target)
+
+    def _await_focus(self, target: TargetWindow) -> bool:
+        """Wait briefly for the window manager to honour the request.
+
+        Returns as soon as focus is confirmed. ``True`` is also returned when
+        focus cannot be verified at all - the engine treats that as "unknown"
+        and applies its own policy - but a definite "some other window has
+        focus" that never resolves is reported as failure.
+        """
+        deadline = time.monotonic() + self._activation_timeout
+        while True:
+            active = self.is_active(target)
+            if active is None or active is True:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(ACTIVATION_POLL_SECONDS)
 
     def is_active(self, target: TargetWindow) -> bool | None:
         """Whether ``target`` holds focus, or ``None`` when unknowable."""
