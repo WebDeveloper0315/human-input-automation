@@ -7,9 +7,23 @@ something - for example that the platform cannot confirm the target has focus).
 
 from __future__ import annotations
 
-from .actions import Action, KeyDown, KeyUp, MouseDown, MouseUp, TypeText, Wait
+from .actions import (
+    Action,
+    KeyDown,
+    KeyPress,
+    KeyUp,
+    MouseClick,
+    MouseDown,
+    MouseMove,
+    MouseUp,
+    Shortcut,
+    TypeText,
+    Wait,
+)
 from .errors import Severity, ValidationIssue, ValidationResult
+from .keys import Key, KeyLike, format_key
 from .plan import AutomationPlan, ExecutionLimits
+from .screen import ScreenGeometry
 from .target import PlatformName, PlatformReport, TargetWindow
 
 
@@ -92,10 +106,62 @@ def validate_target(
     return issues
 
 
-def validate_action(action: Action, index: int, limits: ExecutionLimits) -> list[ValidationIssue]:
-    """Check one action against the configured limits."""
+def _keys_of(action: Action) -> tuple[KeyLike, ...]:
+    """Every key an action would send."""
+    if isinstance(action, (KeyPress, KeyDown, KeyUp)):
+        return (action.key,)
+    if isinstance(action, Shortcut):
+        return action.keys
+    return ()
+
+
+def _coordinates_of(action: Action) -> tuple[int, int] | None:
+    """Absolute screen coordinates an action would move to, if any."""
+    if isinstance(action, MouseMove) and not action.relative:
+        return (action.x, action.y)
+    if isinstance(action, MouseClick):
+        return action.position
+    return None
+
+
+def validate_action(
+    action: Action,
+    index: int,
+    limits: ExecutionLimits,
+    host: PlatformReport | None = None,
+    screen: ScreenGeometry | None = None,
+) -> list[ValidationIssue]:
+    """Check one action against the limits, the host and the screen layout."""
     issues: list[ValidationIssue] = []
     location = f"actions[{index}]"
+
+    if host is not None and host.unsupported_keys:
+        unsupported = set(host.unsupported_keys)
+        for key in _keys_of(action):
+            if isinstance(key, Key) and key in unsupported:
+                issues.append(
+                    _error(
+                        "action.key_unsupported",
+                        f"the {format_key(key)!r} key cannot be sent on "
+                        f"{host.platform.value}; this is a platform limitation",
+                        location,
+                    )
+                )
+
+    coordinates = _coordinates_of(action)
+    if coordinates is not None and screen is not None and screen.is_known:
+        x, y = coordinates
+        if not screen.contains(x, y):
+            left, top, right, bottom = screen.virtual_bounds()
+            issues.append(
+                _error(
+                    "action.coordinates_off_screen",
+                    f"({x}, {y}) is not on any monitor; the desktop spans "
+                    f"({left}, {top}) to ({right}, {bottom}) in "
+                    f"{screen.coordinate_space.value} coordinates",
+                    location,
+                )
+            )
 
     if isinstance(action, TypeText) and len(action.text) > limits.max_text_length:
         issues.append(
@@ -156,8 +222,13 @@ def _validate_balance(actions: tuple[Action, ...]) -> list[ValidationIssue]:
     return issues
 
 
-def validate_plan(plan: AutomationPlan, *, host: PlatformReport | None = None) -> ValidationResult:
-    """Validate a whole plan: target, actions and limits."""
+def validate_plan(
+    plan: AutomationPlan,
+    *,
+    host: PlatformReport | None = None,
+    screen: ScreenGeometry | None = None,
+) -> ValidationResult:
+    """Validate a whole plan: target, actions, limits, keys and coordinates."""
     issues: list[ValidationIssue] = []
     limits = plan.limits
 
@@ -182,7 +253,7 @@ def validate_plan(plan: AutomationPlan, *, host: PlatformReport | None = None) -
         )
 
     for index, action in enumerate(plan.actions):
-        issues.extend(validate_action(action, index, limits))
+        issues.extend(validate_action(action, index, limits, host, screen))
 
     issues.extend(_validate_balance(plan.actions))
     issues.extend(

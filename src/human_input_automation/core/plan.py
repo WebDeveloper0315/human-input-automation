@@ -44,6 +44,11 @@ class RunOptions:
     seed: int | None = None
     #: Abort when the adapter cannot confirm the target actually has focus.
     require_focus_verification: bool = False
+    #: Re-check before every action that the target still holds focus, where the
+    #: platform can answer. Stops a run whose target closed or was switched away
+    #: from, instead of letting the rest of the plan land in another
+    #: application. Platforms that cannot verify focus simply skip the check.
+    reverify_focus: bool = True
 
 
 @dataclass(frozen=True)

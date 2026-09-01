@@ -13,13 +13,25 @@ import argparse
 import logging
 import sys
 
-from .adapters.registry import build_adapters
+from .adapters.registry import AdapterSet, build_adapters
 from .application.service import AutomationService
+from .diagnostics import Diagnostics
 from .ui.models import CapabilityLevel, capability_banner, host_status_text
 
 
-def build_service() -> AutomationService:
-    return AutomationService(build_adapters())
+def build_service(adapters: AdapterSet | None = None) -> AutomationService:
+    return AutomationService(adapters or build_adapters())
+
+
+def run_diagnose() -> int:
+    """Print a full read-only capability report. Sends no input whatsoever."""
+    adapters = build_adapters()
+    try:
+        diagnostics = Diagnostics.collect(adapters)
+        print(diagnostics.render())
+        return diagnostics.exit_code
+    finally:
+        adapters.close()
 
 
 #: Capability levels that still allow a run to be attempted.
@@ -35,9 +47,12 @@ def run_check() -> int:
     1 means it is unavailable or a permission is missing.
     """
     service = build_service()
-    print(host_status_text(service.host, service.problems, service.hotkey_support))
-    banner = capability_banner(service.host, service.problems, service.hotkey_support)
-    return 0 if banner.level in _USABLE_LEVELS else 1
+    try:
+        print(host_status_text(service.host, service.problems, service.hotkey_support))
+        banner = capability_banner(service.host, service.problems, service.hotkey_support)
+        return 0 if banner.level in _USABLE_LEVELS else 1
+    finally:
+        service.close()
 
 
 def run_gui() -> int:
@@ -68,10 +83,18 @@ def run(argv: list[str] | None = None) -> int:
         help="report platform capabilities and permissions, then exit",
     )
     parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="print a detailed read-only platform diagnostic report, then exit "
+        "(never sends keyboard or mouse input)",
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="log diagnostic detail to stderr",
     )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING)
+    if args.diagnose:
+        return run_diagnose()
     return run_check() if args.check else run_gui()

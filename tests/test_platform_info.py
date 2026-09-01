@@ -5,10 +5,14 @@ from __future__ import annotations
 import pytest
 
 from human_input_automation.adapters.platform_info import (
+    MACOS_ACCESSIBILITY,
+    MACOS_INPUT_MONITORING,
     describe_host,
     detect_display_server,
     detect_platform,
+    has_xwayland,
 )
+from human_input_automation.core.capabilities import CapabilityName, CapabilityState
 from human_input_automation.core.target import DisplayServer, PlatformName
 
 
@@ -96,3 +100,98 @@ def test_unknown_platform_is_reported_honestly() -> None:
     report = describe_host(PlatformName.UNKNOWN, DisplayServer.UNKNOWN, env={})
     assert not report.can_automate
     assert report.warnings
+
+
+# -- capability matrix ----------------------------------------------------
+def test_windows_matrix_is_fully_available() -> None:
+    matrix = describe_host(PlatformName.WINDOWS, DisplayServer.WINDOWS, env={}).matrix
+    assert all(capability.state is CapabilityState.AVAILABLE for capability in matrix)
+    assert matrix.missing_permissions() == ()
+
+
+def test_x11_matrix_is_available_except_for_scaling() -> None:
+    matrix = describe_host(PlatformName.LINUX, DisplayServer.X11, env={"DISPLAY": ":0"}).matrix
+    assert matrix.state(CapabilityName.WINDOW_ENUMERATION) is CapabilityState.AVAILABLE
+    assert matrix.state(CapabilityName.GLOBAL_HOTKEY) is CapabilityState.AVAILABLE
+    assert matrix.state(CapabilityName.MULTI_MONITOR) is CapabilityState.RESTRICTED
+
+
+def test_wayland_matrix_marks_window_control_unavailable() -> None:
+    matrix = describe_host(PlatformName.LINUX, DisplayServer.WAYLAND, env={}).matrix
+    for name in (
+        CapabilityName.WINDOW_ENUMERATION,
+        CapabilityName.WINDOW_ACTIVATION,
+        CapabilityName.FOCUS_VERIFICATION,
+        CapabilityName.KEYBOARD_INPUT,
+        CapabilityName.GLOBAL_HOTKEY,
+    ):
+        assert matrix.state(name) is CapabilityState.UNAVAILABLE, name
+
+
+def test_xwayland_upgrades_input_and_enumeration_to_restricted_only() -> None:
+    """Verified on Ubuntu 26.04 GNOME/Wayland: X11 clients are visible, others are not."""
+    matrix = describe_host(
+        PlatformName.LINUX, DisplayServer.WAYLAND, env={"DISPLAY": ":0"}
+    ).matrix
+    assert matrix.state(CapabilityName.WINDOW_ENUMERATION) is CapabilityState.RESTRICTED
+    assert matrix.state(CapabilityName.KEYBOARD_INPUT) is CapabilityState.RESTRICTED
+    assert matrix.state(CapabilityName.WINDOW_ACTIVATION) is CapabilityState.UNAVAILABLE
+    assert matrix.state(CapabilityName.GLOBAL_HOTKEY) is CapabilityState.UNAVAILABLE
+
+
+def test_macos_separates_accessibility_from_input_monitoring() -> None:
+    """Two different permissions: holding one does not imply the other."""
+    report = describe_host(
+        PlatformName.MACOS,
+        DisplayServer.QUARTZ,
+        env={},
+        accessibility_trusted=True,
+        input_monitoring_trusted=False,
+    )
+    matrix = report.matrix
+    assert matrix.state(CapabilityName.KEYBOARD_INPUT) is CapabilityState.AVAILABLE
+    assert matrix.state(CapabilityName.GLOBAL_HOTKEY) is CapabilityState.DENIED
+    assert matrix.get(CapabilityName.GLOBAL_HOTKEY).permission == MACOS_INPUT_MONITORING
+    assert report.missing_permissions == (MACOS_INPUT_MONITORING,)
+
+
+def test_macos_accessibility_denial_names_the_setting_and_the_restart() -> None:
+    report = describe_host(
+        PlatformName.MACOS, DisplayServer.QUARTZ, env={}, accessibility_trusted=False
+    )
+    capability = report.matrix.get(CapabilityName.KEYBOARD_INPUT)
+    assert capability.state is CapabilityState.DENIED
+    assert capability.permission == MACOS_ACCESSIBILITY
+    assert "Accessibility" in (capability.permission_category or "")
+    assert capability.requires_restart
+
+
+def test_macos_permission_that_cannot_be_probed_is_unknown_not_denied() -> None:
+    report = describe_host(
+        PlatformName.MACOS,
+        DisplayServer.QUARTZ,
+        env={},
+        accessibility_trusted=None,
+        input_monitoring_trusted=None,
+    )
+    assert report.matrix.state(CapabilityName.KEYBOARD_INPUT) is CapabilityState.UNKNOWN
+    assert report.missing_permissions == ()
+    assert report.can_automate, "unknown must let the user try"
+
+
+def test_unknown_platform_has_no_adapter_and_says_so() -> None:
+    matrix = describe_host(PlatformName.UNKNOWN, DisplayServer.UNKNOWN, env={}).matrix
+    assert matrix.state(CapabilityName.KEYBOARD_INPUT) is CapabilityState.UNAVAILABLE
+    assert "no platform adapter" in matrix.reason(CapabilityName.KEYBOARD_INPUT)
+
+
+def test_platform_key_gaps_are_carried_on_the_report() -> None:
+    macos = describe_host(PlatformName.MACOS, DisplayServer.QUARTZ, env={})
+    windows = describe_host(PlatformName.WINDOWS, DisplayServer.WINDOWS, env={})
+    assert [key.value for key in macos.unsupported_keys] == ["insert"]
+    assert windows.unsupported_keys == ()
+
+
+def test_xwayland_detection() -> None:
+    assert has_xwayland({"DISPLAY": ":0"})
+    assert not has_xwayland({})

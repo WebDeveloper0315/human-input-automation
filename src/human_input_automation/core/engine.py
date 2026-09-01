@@ -52,6 +52,7 @@ from .events import (
 )
 from .keys import KeyLike, MouseButton
 from .plan import AutomationPlan
+from .screen import ScreenGeometry
 from .target import PlatformReport
 from .timing import TimingService
 from .validation import validate_plan
@@ -196,10 +197,14 @@ class AutomationEngine:
         return self._registry
 
     def validate(
-        self, plan: AutomationPlan, *, host: PlatformReport | None = None
+        self,
+        plan: AutomationPlan,
+        *,
+        host: PlatformReport | None = None,
+        screen: ScreenGeometry | None = None,
     ) -> ValidationResult:
         """Validate ``plan`` without running it."""
-        return validate_plan(plan, host=host)
+        return validate_plan(plan, host=host, screen=screen)
 
     def run(
         self,
@@ -208,6 +213,7 @@ class AutomationEngine:
         listener: EventListener | None = None,
         *,
         host: PlatformReport | None = None,
+        screen: ScreenGeometry | None = None,
     ) -> RunReport:
         """Execute ``plan`` and return a report. This call blocks.
 
@@ -218,7 +224,7 @@ class AutomationEngine:
         control = control or RunControl()
         emit = self._make_emitter(listener)
 
-        result = validate_plan(plan, host=host)
+        result = validate_plan(plan, host=host, screen=screen)
         if not result.ok:
             report = RunReport(
                 status=RunStatus.INVALID,
@@ -258,6 +264,7 @@ class AutomationEngine:
                 ctx.index = index
                 ctx.checkpoint()
                 self._enforce_runtime_limits(plan, executed, started_at, clock)
+                self._verify_still_focused(plan, windows)
 
                 emit(ActionStarted(index, action, action.describe()))
                 action_started = clock.monotonic()
@@ -351,6 +358,27 @@ class AutomationEngine:
                 "require_focus_verification is enabled"
             )
         emit(TargetActivated(target, verified=bool(active)))
+
+    def _verify_still_focused(
+        self, plan: AutomationPlan, windows: WindowControlPort | None
+    ) -> None:
+        """Stop if the target stopped being the focused window mid-run.
+
+        A window can close, be replaced, or simply lose focus while a plan is
+        running. Without this check the remaining actions would land in whatever
+        window took over - a silent redirect into another application.
+        ``None`` (cannot tell) is not treated as a failure.
+        """
+        if windows is None or not plan.options.reverify_focus:
+            return
+        target = plan.target
+        if target.is_focused_window or not target.capabilities.can_verify_focus:
+            return
+        if windows.is_active(target) is False:
+            raise TargetActivationError(
+                f"the target window {target.describe()} is no longer focused; "
+                "stopping so the remaining actions are not sent elsewhere"
+            )
 
     def _enforce_runtime_limits(
         self, plan: AutomationPlan, executed: int, started_at: float, clock: Clock

@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Protocol, runtime_checkable
 
 from ..core.keys import KeyLike, MouseButton
+from .clock import CancelToken
 
 
 @runtime_checkable
@@ -37,11 +38,20 @@ class MousePort(Protocol):
         """Current pointer position in screen coordinates."""
         ...
 
-    def move_to(self, x: int, y: int, duration_ms: float) -> None:
-        """Move the pointer to an absolute position over ``duration_ms``."""
+    def move_to(
+        self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
+        """Move the pointer to an absolute position over ``duration_ms``.
+
+        Implementations should block for approximately ``duration_ms`` and must
+        abandon the movement as soon as ``cancel`` reports a stop, so an
+        emergency stop is never delayed by a long movement.
+        """
         ...
 
-    def move_by(self, dx: int, dy: int, duration_ms: float) -> None:
+    def move_by(
+        self, dx: int, dy: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         """Move the pointer relative to its current position."""
         ...
 

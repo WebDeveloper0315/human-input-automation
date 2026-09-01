@@ -40,11 +40,15 @@ class RecordingMouse:
     def position(self) -> tuple[int, int]:
         return self._position
 
-    def move_to(self, x: int, y: int, duration_ms: float) -> None:
+    def move_to(
+        self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         self._position = (x, y)
         self.calls.append(("move_to", f"{x},{y}"))
 
-    def move_by(self, dx: int, dy: int, duration_ms: float) -> None:
+    def move_by(
+        self, dx: int, dy: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         self._position = (self._position[0] + dx, self._position[1] + dy)
         self.calls.append(("move_by", f"{dx},{dy}"))
 

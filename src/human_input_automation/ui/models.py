@@ -227,6 +227,41 @@ def _platform_label(host: PlatformReport) -> str:
     return f"{host.platform.value}/{host.display_server.value}"
 
 
+def _permission_details(host: PlatformReport) -> list[str]:
+    """Explain each missing permission: what it blocks, where to grant it.
+
+    "Permission denied" on its own is not actionable, so the capability that is
+    blocked, the settings pane and the need to restart are all named.
+    """
+    details: list[str] = []
+    for permission in host.missing_permissions:
+        blocked = [
+            capability.name.value.replace("_", " ")
+            for capability in host.matrix
+            if capability.permission == permission and not capability.is_permitted
+        ]
+        text = f"Missing permission: {permission}"
+        if blocked:
+            text += f" - blocks {', '.join(blocked)}"
+        where = next(
+            (
+                capability.permission_category
+                for capability in host.matrix
+                if capability.permission == permission and capability.permission_category
+            ),
+            None,
+        )
+        if where:
+            text += f". Grant it in {where}"
+        if any(
+            capability.permission == permission and capability.requires_restart
+            for capability in host.matrix
+        ):
+            text += ", then restart this application"
+        details.append(text)
+    return details
+
+
 def capability_banner(
     host: PlatformReport,
     problems: Sequence[str] = (),
@@ -234,7 +269,7 @@ def capability_banner(
 ) -> BannerModel:
     """Summarise host capabilities into one honest banner."""
     details = list(host.warnings)
-    details.extend(f"Missing permission: {permission}" for permission in host.missing_permissions)
+    details.extend(_permission_details(host))
     details.extend(problems)
     if hotkey is not None:
         details.append(f"Emergency-stop hotkey: {hotkey.reason}")
@@ -290,8 +325,12 @@ def host_status_text(
         f"Activate windows: {_yes_no(capabilities.can_activate)}",
         f"Verify focus: {_yes_no(capabilities.can_verify_focus)}",
     ]
-    if host.missing_permissions:
-        lines.append("Missing permissions: " + ", ".join(host.missing_permissions))
+    if host.matrix:
+        lines.append("")
+        lines.append("Capability detail:")
+        lines.extend(f"  {name}: {state}" for name, state, _reason in host.matrix.rows())
+        lines.append("")
+    lines.extend(_permission_details(host))
     lines.extend(f"Note: {warning}" for warning in host.warnings)
     lines.extend(f"Adapter: {problem}" for problem in problems)
     if hotkey is not None:

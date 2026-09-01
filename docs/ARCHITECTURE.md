@@ -44,8 +44,14 @@ same name and confuses packaging and analysis tools.
 | `core/handlers.py` | One handler function per built-in action |
 | `core/events.py` | Run events and `RunReport` |
 | `core/dryrun.py` | Recording no-op ports used by dry-run mode |
-| `ports/*` | `KeyboardPort`, `MousePort`, `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort` |
-| `adapters/platform_info.py` | Platform/display-server/permission detection |
+| `ports/*` | `KeyboardPort`, `MousePort`, `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort` |
+| `core/capabilities.py` | `CapabilityMatrix`: per-capability state, reason, permission |
+| `core/screen.py` | `MonitorInfo`, `ScreenGeometry`, coordinate space |
+| `adapters/platform_info.py` | Platform/display-server/permission detection, capability matrices |
+| `adapters/keymap.py` | **The only** place platform key names live |
+| `adapters/x11_windows.py` | X11/EWMH window discovery and activation (Linux) |
+| `adapters/screens.py` | Monitor layout via pymonctl |
+| `diagnostics.py` | `--diagnose`: read-only capability report |
 | `adapters/pynput_input.py` | Real keyboard and mouse (lazy import) |
 | `adapters/pywinctl_windows.py` | Real window discovery/activation (lazy import) |
 | `adapters/registry.py` | Chooses adapters, degrades to null adapters |
@@ -136,16 +142,60 @@ that cannot enumerate or activate windows; validation warns whenever it is used.
 
 ### Platform capabilities are not uniform
 
-| | Windows | macOS | Linux/X11 | Linux/Wayland |
-| --- | --- | --- | --- | --- |
-| Enumerate windows | yes | yes (with permission) | yes | no |
-| Activate window | yes | yes (with permission) | yes | no |
-| Verify focus | yes | yes (with permission) | yes | no |
-| Synthetic input | yes | Accessibility permission required | yes | restricted; XWayland clients at best |
+Capabilities are a matrix, not a set of booleans. Each entry carries a state, a
+reason, and where relevant the permission that would unblock it:
 
-`adapters/platform_info.describe_host()` reports this as a `PlatformReport`,
-including missing permissions and warnings, and the UI surfaces it. Wayland's
-restrictions are a deliberate security design, not a defect to work around.
+| State | Meaning |
+| --- | --- |
+| `available` | Works. |
+| `restricted` | Works in a reduced form; the reason says how. |
+| `denied` | Supported, but a permission is missing. Fixable by the user. |
+| `unavailable` | The platform or backend does not provide it. |
+| `unknown` | Could not be determined. **Never displayed as "no".** |
+
+`available`, `restricted` and `unknown` permit an attempt (an attempt that
+fails aborts the run safely); `denied` and `unavailable` block it. The boolean
+`WindowCapabilities` the engine gates on are *derived* from the matrix, so the
+engine keeps a simple gate while the UI and `--diagnose` show the full picture.
+
+| | Windows | macOS | Linux/X11 | Linux/Wayland (+XWayland) |
+| --- | --- | --- | --- | --- |
+| Enumerate windows | available | Accessibility | available | unavailable (restricted: X11 clients only) |
+| Activate window | available | Accessibility | available | unavailable |
+| Verify focus | available | Accessibility | available | unavailable |
+| Synthetic input | available | Accessibility | available | unavailable (restricted: X11 clients only) |
+| Global hotkey | available | **Input Monitoring** | available | unavailable |
+| Multi-monitor | available | restricted (logical points) | restricted (no scale reported) | restricted |
+
+macOS needs **two different permissions**: Accessibility for input and window
+control, Input Monitoring for observing global keys (the emergency-stop
+hotkey). Holding one does not imply the other, so they are modelled and
+reported separately, each with the settings pane that grants it and whether a
+restart is needed.
+
+Which window backend is used is decided from capabilities, not the OS name
+(`registry.select_window_backend`): Linux gets the EWMH adapter, Windows and
+macOS get pywinctl, and a session that cannot enumerate gets none at all with a
+reason attached. Linux/X11 and Linux/Wayland are treated as different
+platforms, because they are.
+
+### Keyboard translation
+
+All platform key knowledge lives in `adapters/keymap.py` — nothing else may
+contain a platform key name. It also records which keys a platform's backend
+genuinely lacks (`Key.INSERT` does not exist on macOS), which the host report
+carries and validation rejects **before** a run starts rather than raising
+mid-plan.
+
+### Coordinates
+
+`core/screen.py` models the monitor layout and states the coordinate space
+(`physical` on Windows/X11, `logical` on macOS, `unknown` otherwise) instead of
+assuming one. Per-monitor scale is `None` when the backend cannot report it.
+Validation rejects absolute coordinates that land on no monitor - including the
+gap between two non-adjacent monitors - while negative coordinates (monitors
+left of or above the primary) are valid. Unknown geometry disables the check
+rather than blocking a run.
 
 ## Safety
 
@@ -162,7 +212,19 @@ restrictions are a deliberate security design, not a defect to work around.
 * **Cleanup** — held keys and mouse buttons are always released in the engine's
   `finally`, so a stop never leaves a modifier stuck down.
 * **Failure isolation** — a broken event listener or an adapter exception is
-  caught, reported as `FAILED`, and never crashes the caller.
+  caught, reported as `FAILED`, and never crashes the caller. Platform adapters
+  additionally convert backend failures into empty results or `False`, so a
+  library defect cannot surface as a traceback.
+* **Mid-run focus re-verification** — before each action, a target that the
+  platform can verify is re-checked. If it stopped being focused (closed, or the
+  user switched away) the run fails instead of letting the remaining actions
+  land in another application. Platforms that cannot verify focus skip the
+  check; unknown is never treated as failure.
+* **Bounded stop latency** — every wait is an interruptible `Event.wait`.
+  The two exceptions are documented, not hidden: a mouse movement can delay a
+  stop by one ~8 ms interpolation step, and a zero-delay `TypeText` is handed
+  to the backend as one uninterruptible call. See
+  `docs/PHASE3-PLATFORM-REPORT.md` §6.
 
 ## Threading and the Qt boundary
 
@@ -300,7 +362,9 @@ imported, and left to manual/Phase 3 verification on real hardware.
 | --- | --- | --- |
 | PySide6 | keep, `[gui]` extra | Mature Qt binding, LGPL, all three platforms, good threading story. Only the `ui` layer may import it. |
 | pynput | keep, `[input]` extra | The practical cross-platform synthetic-input library. Weaknesses (no key-name mapping, no movement interpolation, Wayland limits) are absorbed by the adapter. |
-| pywinctl | keep, `[windows]` extra | The only maintained cross-platform window enumeration/activation layer; it wraps Win32, the macOS Accessibility APIs and X11 (EWMH). Replacing it would mean three separate native integrations. |
+| pywinctl | keep for Windows/macOS, `[windows]` extra | Wraps Win32 and the macOS Accessibility APIs. **Not used on Linux**: its Linux path raises `KeyError: 'id'` on Ubuntu 26.04 GNOME (reproduced), so Linux uses the EWMH adapter instead. |
+| python-xlib | added, `[x11]` extra (Linux only) | Already a pywinctl dependency. Drives the EWMH window adapter that replaces pywinctl on Linux. |
+| pymonctl | used via pywinctl, no new requirement | Monitor layout for coordinate validation. |
 | PyYAML | moved to `[yaml]` extra, unused for now | Profiles are not implemented yet, and `json` from the standard library covers them. YAML stays available if human-editable profiles are wanted later. |
 
 The core itself has **no runtime dependencies**: `pip install -e ".[dev]"`

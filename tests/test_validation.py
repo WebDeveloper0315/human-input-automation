@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from human_input_automation.core.actions import KeyDown, MouseDown, TypeText, Wait
 from human_input_automation.core.plan import AutomationPlan, ExecutionLimits, RunOptions
+from human_input_automation.core.screen import CoordinateSpace, MonitorInfo, ScreenGeometry
 from human_input_automation.core.target import (
     DisplayServer,
     PlatformName,
@@ -128,3 +129,117 @@ def test_unbalanced_key_and_button_holds_are_warnings() -> None:
     assert result.ok
     codes_found = {issue.code for issue in result.warnings}
     assert {"plan.unbalanced_keys", "plan.unbalanced_buttons"} <= codes_found
+
+
+# -- platform key gaps ----------------------------------------------------
+def macos_host(**kwargs: object) -> PlatformReport:
+    from human_input_automation.adapters.platform_info import describe_host
+
+    return describe_host(
+        PlatformName.MACOS, DisplayServer.QUARTZ, env={}, accessibility_trusted=True, **kwargs  # type: ignore[arg-type]
+    )
+
+
+def test_a_key_the_platform_cannot_send_is_rejected_before_the_run() -> None:
+    """pynput's macOS backend has no `insert` key: fail up front, not mid-plan."""
+    from human_input_automation.core.actions import KeyPress
+
+    plan = AutomationPlan(make_target(), [KeyPress(key="insert")])
+    result = validate_plan(plan, host=macos_host())
+    assert not result.ok
+    issue = next(i for i in result.errors if i.code == "action.key_unsupported")
+    assert "insert" in issue.message and "macos" in issue.message
+
+
+def test_the_same_key_is_fine_on_platforms_that_have_it() -> None:
+    from human_input_automation.adapters.platform_info import describe_host
+    from human_input_automation.core.actions import KeyPress
+
+    windows = describe_host(PlatformName.WINDOWS, DisplayServer.WINDOWS, env={})
+    plan = AutomationPlan(
+        TargetWindow(
+            handle="w1", platform=PlatformName.WINDOWS, capabilities=WindowCapabilities.full()
+        ),
+        [KeyPress(key="insert")],
+    )
+    assert validate_plan(plan, host=windows).ok
+
+
+def test_unsupported_keys_are_caught_inside_shortcuts_and_holds() -> None:
+    from human_input_automation.core.actions import KeyDown, Shortcut
+
+    host = macos_host()
+    for action in (Shortcut(keys=("ctrl", "insert")), KeyDown(key="insert")):
+        result = validate_plan(AutomationPlan(make_target(), [action]), host=host)
+        assert any(i.code == "action.key_unsupported" for i in result.errors)
+
+
+# -- coordinate validation ------------------------------------------------
+def two_monitor_desktop() -> ScreenGeometry:
+    return ScreenGeometry(
+        monitors=(
+            MonitorInfo("primary", 0, 0, 1920, 1080, is_primary=True),
+            MonitorInfo("second", 1920, 0, 1920, 1080),
+        ),
+        coordinate_space=CoordinateSpace.PHYSICAL,
+    )
+
+
+def test_coordinates_on_a_second_monitor_are_accepted() -> None:
+    from human_input_automation.core.actions import MouseMove
+
+    plan = AutomationPlan(make_target(), [MouseMove(x=2500, y=500)])
+    assert validate_plan(plan, screen=two_monitor_desktop()).ok
+
+
+def test_coordinates_beyond_every_monitor_are_rejected_with_the_bounds() -> None:
+    from human_input_automation.core.actions import MouseMove
+
+    plan = AutomationPlan(make_target(), [MouseMove(x=5000, y=500)])
+    result = validate_plan(plan, screen=two_monitor_desktop())
+    issue = next(i for i in result.errors if i.code == "action.coordinates_off_screen")
+    assert "(0, 0) to (3840, 1080)" in issue.message
+    assert "physical" in issue.message
+
+
+def test_click_coordinates_are_validated_too() -> None:
+    from human_input_automation.core.actions import MouseClick
+
+    plan = AutomationPlan(make_target(), [MouseClick(x=4000, y=10)])
+    assert not validate_plan(plan, screen=two_monitor_desktop()).ok
+
+
+def test_relative_movement_is_never_bounds_checked() -> None:
+    from human_input_automation.core.actions import MouseMove
+
+    plan = AutomationPlan(make_target(), [MouseMove(x=-9999, y=-9999, relative=True)])
+    assert validate_plan(plan, screen=two_monitor_desktop()).ok
+
+
+def test_clicks_without_coordinates_are_never_bounds_checked() -> None:
+    from human_input_automation.core.actions import MouseClick
+
+    plan = AutomationPlan(make_target(), [MouseClick()])
+    assert validate_plan(plan, screen=two_monitor_desktop()).ok
+
+
+def test_unknown_geometry_disables_coordinate_validation() -> None:
+    from human_input_automation.core.actions import MouseMove
+
+    plan = AutomationPlan(make_target(), [MouseMove(x=99_999, y=99_999)])
+    assert validate_plan(plan, screen=ScreenGeometry.unknown("no backend")).ok
+    assert validate_plan(plan).ok
+
+
+def test_a_gap_between_monitors_is_rejected() -> None:
+    from human_input_automation.core.actions import MouseMove
+
+    detached = ScreenGeometry(
+        monitors=(
+            MonitorInfo("primary", 0, 0, 1920, 1080, is_primary=True),
+            MonitorInfo("far", 3000, 0, 1920, 1080),
+        ),
+        coordinate_space=CoordinateSpace.PHYSICAL,
+    )
+    plan = AutomationPlan(make_target(), [MouseMove(x=2500, y=500)])
+    assert not validate_plan(plan, screen=detached).ok

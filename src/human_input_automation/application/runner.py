@@ -27,6 +27,7 @@ from ..core.events import (
     RunStatus,
 )
 from ..core.plan import AutomationPlan
+from ..core.screen import ScreenGeometry
 from ..core.target import PlatformReport
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class AutomationRunner:
         listener: EventListener | None = None,
         *,
         host: PlatformReport | None = None,
+        screen: ScreenGeometry | None = None,
         countdown_seconds: float = 0.0,
     ) -> None:
         """Start ``plan`` in the background. Raises if a run is already active.
@@ -77,7 +79,7 @@ class AutomationRunner:
             self._control = RunControl()
             thread = threading.Thread(
                 target=self._run,
-                args=(plan, listener or self._listener, host, countdown_seconds),
+                args=(plan, listener or self._listener, host, screen, countdown_seconds),
                 name="automation-runner",
                 daemon=True,
             )
@@ -89,6 +91,7 @@ class AutomationRunner:
         plan: AutomationPlan,
         listener: EventListener | None,
         host: PlatformReport | None,
+        screen: ScreenGeometry | None = None,
         countdown_seconds: float = 0.0,
     ) -> None:
         emit = self._make_emitter(listener)
@@ -99,7 +102,7 @@ class AutomationRunner:
             with self._lock:
                 self._report = report
             return
-        report = self._engine.run(plan, self._control, listener, host=host)
+        report = self._engine.run(plan, self._control, listener, host=host, screen=screen)
         with self._lock:
             self._report = report
 

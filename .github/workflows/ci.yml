@@ -63,15 +63,33 @@ jobs:
 
   headless:
     name: headless capability check
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
       - run: pip install -e "."
+      - name: the core must import without any desktop library
+        run: |
+          python - <<'PY'
+          import sys
+          import human_input_automation.core  # noqa: F401
+          import human_input_automation.application  # noqa: F401
+          import human_input_automation.diagnostics  # noqa: F401
+          forbidden = [m for m in ("PySide6", "pynput", "pywinctl", "Xlib") if m in sys.modules]
+          raise SystemExit(f"core pulled in {forbidden}" if forbidden else 0)
+          PY
       - name: --check must work without a display or the gui extra
+        shell: bash
         run: python -m human_input_automation --check || test $? -eq 1
+      - name: --diagnose must work headless and send no input
+        shell: bash
+        run: python -m human_input_automation --diagnose || test $? -eq 1
 
   packaging:
     name: build wheel

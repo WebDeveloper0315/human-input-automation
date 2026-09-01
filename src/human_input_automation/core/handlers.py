@@ -75,15 +75,17 @@ def handle_shortcut(action: Shortcut, ctx: ExecutionContext) -> None:
 def handle_mouse_move(action: MouseMove, ctx: ExecutionContext) -> None:
     duration = ctx.timing.mouse_move_duration_ms(action.duration_ms)
     if action.relative:
-        ctx.mouse.move_by(action.x, action.y, duration)
+        ctx.mouse.move_by(action.x, action.y, duration, ctx.control)
     else:
-        ctx.mouse.move_to(action.x, action.y, duration)
+        ctx.mouse.move_to(action.x, action.y, duration, ctx.control)
 
 
 def handle_mouse_click(action: MouseClick, ctx: ExecutionContext) -> None:
     position = action.position
     if position is not None:
-        ctx.mouse.move_to(position[0], position[1], ctx.timing.mouse_move_duration_ms())
+        ctx.mouse.move_to(
+            position[0], position[1], ctx.timing.mouse_move_duration_ms(), ctx.control
+        )
     for repetition in range(action.count):
         ctx.checkpoint()
         ctx.hold_button(action.button)

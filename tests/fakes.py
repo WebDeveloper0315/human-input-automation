@@ -83,18 +83,25 @@ class FakeMouse:
     """Mouse port that records every call."""
 
     calls: list[tuple[str, str]] = field(default_factory=list)
+    durations_ms: list[float] = field(default_factory=list)
     _position: tuple[int, int] = (0, 0)
 
     def position(self) -> tuple[int, int]:
         return self._position
 
-    def move_to(self, x: int, y: int, duration_ms: float) -> None:
+    def move_to(
+        self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         self._position = (x, y)
         self.calls.append(("move_to", f"{x},{y}"))
+        self.durations_ms.append(duration_ms)
 
-    def move_by(self, dx: int, dy: int, duration_ms: float) -> None:
+    def move_by(
+        self, dx: int, dy: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         self._position = (self._position[0] + dx, self._position[1] + dy)
         self.calls.append(("move_by", f"{dx},{dy}"))
+        self.durations_ms.append(duration_ms)
 
     def button_down(self, button: MouseButton) -> None:
         self.calls.append(("button_down", button.value))

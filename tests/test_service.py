@@ -86,7 +86,7 @@ def test_status_text_surfaces_platform_limitations() -> None:
     text = host_status_text(service.host, service.problems)
     assert "wayland" in text
     assert "Wayland restricts input" in text
-    assert "Missing permissions: something" in text
+    assert "Missing permission: something" in text
 
 
 def test_null_adapters_report_a_non_functional_host() -> None:

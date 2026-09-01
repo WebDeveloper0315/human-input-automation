@@ -39,6 +39,26 @@ ui -> application -> core <- adapters, with ports/ between core and adapters
 * New action type? Add the dataclass and handler in `core/`, then an
   `ActionSpec` in `ui/models.py` — the editor dialog is generated from it.
 
+## Platform rules
+
+* All platform key names live in `adapters/keymap.py`. Nowhere else.
+* Never report a capability as available without evidence, and never render
+  `unknown` as "no". Use the five states in `core/capabilities.py`.
+* Choose adapters from capabilities, not from the OS name. Linux/X11 and
+  Linux/Wayland are different platforms.
+* Wrap every third-party platform call: a backend defect must surface as data
+  (empty result, `False`, `None`) with a reason, never as a traceback.
+* Make third-party modules injectable (`module=`, `display=`) so adapter logic
+  is testable without the library and without a desktop.
+* Never work around a platform's security model. Wayland restrictions and macOS
+  permissions are reported and explained, never circumvented.
+* Mark OS-dependent tests (`@pytest.mark.manual`, `windows`, `macos`, `linux`,
+  `x11`, `wayland`). They are excluded from the default run; CI never needs a
+  desktop.
+* When you verify something on a real machine, record it in
+  `docs/PHASE3-PLATFORM-REPORT.md` with what you ran. Never upgrade a
+  "NOT TESTED" to "PASS" without executing the test.
+
 ## Invariants
 
 * Never send input before the target is activated and focus is checked.
@@ -57,6 +77,10 @@ ui -> application -> core <- adapters, with ports/ between core and adapters
   aimed at defeating anti-bot, CAPTCHA or access controls.
 * Be honest about platform differences — especially Wayland restrictions and
   macOS Accessibility permissions.
+* Validate keys and coordinates against the host before a run rather than
+  failing halfway through one.
+* Re-verify the target still has focus during a run where the platform allows
+  it; never let a plan continue into a window the user did not select.
 
 ## Tests
 
@@ -78,7 +102,8 @@ pytest
 ruff check .
 mypy src
 mypy src tests
-python -m human_input_automation --check   # must work headless
+python -m human_input_automation --check      # must work headless
+python -m human_input_automation --diagnose  # must work headless, sends no input
 ```
 
 All must pass. Do not skip or silence failing tests, and do not weaken strict

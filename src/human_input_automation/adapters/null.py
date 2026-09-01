@@ -17,6 +17,7 @@ from ..core.target import (
     TargetWindow,
     WindowCapabilities,
 )
+from ..ports.clock import CancelToken
 
 __all__ = [
     "NullCapabilityProbe",
@@ -48,10 +49,14 @@ class NullMouse:
     def position(self) -> tuple[int, int]:
         return (0, 0)
 
-    def move_to(self, x: int, y: int, duration_ms: float) -> None:
+    def move_to(
+        self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         return None
 
-    def move_by(self, dx: int, dy: int, duration_ms: float) -> None:
+    def move_by(
+        self, dx: int, dy: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
         return None
 
     def button_down(self, button: MouseButton) -> None:

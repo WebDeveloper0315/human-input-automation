@@ -341,5 +341,5 @@ class MainWindow(QMainWindow):
         if self._service.is_running:
             self._service.emergency_stop()
             self._service.join(2.0)
-        self._service.disable_emergency_hotkey()
+        self._service.close()
         super().closeEvent(event)  # type: ignore[arg-type]

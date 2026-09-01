@@ -17,6 +17,7 @@ from ..core.engine import AutomationEngine
 from ..core.errors import ValidationResult
 from ..core.events import EventListener, RunReport
 from ..core.plan import AutomationPlan
+from ..core.screen import ScreenGeometry
 from ..core.target import DisplayServer, PlatformName, PlatformReport, TargetWindow
 from ..core.validation import validate_plan
 from ..ports.hotkeys import HotkeyPort
@@ -62,6 +63,16 @@ class AutomationService:
     def host(self) -> PlatformReport:
         """What this machine can and cannot do, including missing permissions."""
         return self._adapters.host
+
+    @property
+    def screen(self) -> ScreenGeometry:
+        """Monitor layout, re-read on each call so hot-plugging is picked up."""
+        return self._adapters.geometry()
+
+    @property
+    def window_backend(self) -> str:
+        """Which window backend was selected for this host."""
+        return self._adapters.window_backend
 
     @property
     def problems(self) -> tuple[str, ...]:
@@ -125,7 +136,7 @@ class AutomationService:
 
     # -- running -----------------------------------------------------------
     def validate(self, plan: AutomationPlan) -> ValidationResult:
-        return validate_plan(plan, host=self.host)
+        return validate_plan(plan, host=self.host, screen=self.screen)
 
     def dry_run(self, plan: AutomationPlan) -> RunReport:
         """Preview a plan.
@@ -134,7 +145,7 @@ class AutomationService:
         returns immediately; ``report.elapsed_ms`` is the estimated duration of
         a real run.
         """
-        return self._engine.run(plan.as_dry_run(), host=self.host)
+        return self._engine.run(plan.as_dry_run(), host=self.host, screen=self.screen)
 
     def start(
         self,
@@ -145,7 +156,11 @@ class AutomationService:
     ) -> None:
         """Run ``plan`` on a worker thread after an optional countdown."""
         self._runner.start(
-            plan, listener, host=self.host, countdown_seconds=countdown_seconds
+            plan,
+            listener,
+            host=self.host,
+            screen=self.screen,
+            countdown_seconds=countdown_seconds,
         )
 
     def pause(self) -> None:
@@ -187,6 +202,10 @@ class AutomationService:
 
     def disable_emergency_hotkey(self) -> None:
         self._adapters.hotkey.stop()
+
+    def close(self) -> None:
+        """Release adapter resources. Call once, when the application exits."""
+        self._adapters.close()
 
     @property
     def is_running(self) -> bool:

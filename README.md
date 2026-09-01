@@ -3,9 +3,11 @@
 Cross-platform desktop automation for keyboard and mouse input, inspired by
 AutoIt. Windows, macOS and Ubuntu/Linux.
 
-**Status:** Phase 2 complete — the automation core *and* a working desktop UI.
-Real per-platform adapter behaviour is Phase 3, profile persistence is Phase 4
-(see `docs/ROADMAP.md`).
+**Status:** Phase 3 — the automation core, a working desktop UI, and hardened
+platform adapters with an honest capability model. **Real end-to-end input has
+not yet been verified on Windows, macOS or a native X11 session**; see
+"Platform support" below and `docs/PHASE3-PLATFORM-REPORT.md`. Profile
+persistence is Phase 4 (`docs/ROADMAP.md`).
 
 ## What it does
 
@@ -48,9 +50,34 @@ three).
 ## Run
 
 ```bash
-python -m human_input_automation           # desktop UI (needs the gui extra)
-python -m human_input_automation --check   # report platform capabilities, headless
-python -m human_input_automation --verbose # add diagnostic logging
+python -m human_input_automation             # desktop UI (needs the gui extra)
+python -m human_input_automation --check     # short capability summary, headless
+python -m human_input_automation --diagnose  # full platform report, sends no input
+python -m human_input_automation --verbose   # add diagnostic logging
+```
+
+`--diagnose` is the one to run when something does not work. It never sends
+keyboard or mouse input; it only inspects:
+
+```
+Human Input Automation Diagnostics
+
+OS: Linux
+Display server: wayland
+Window backend: x11
+
+Capabilities:
+  window_enumeration  restricted
+  window_activation   unavailable
+  keyboard_input      restricted
+  global_hotkey       unavailable
+  multi_monitor       restricted
+...
+Displays:
+  2 monitor(s), virtual desktop 3840x1080 from (0, 0), physical coordinates
+  - HDMI-2 (primary): 1920x1080 at (0, 0), scale unknown
+
+No input was generated.
 ```
 
 `--check` needs no display and no GUI extra. Exit code 0 means automation can be
@@ -128,32 +155,72 @@ service.emergency_stop()                    # returns immediately, releases held
 
 ## Platform support
 
+Capabilities are reported in five states — **available**, **restricted**,
+**denied** (a permission is missing), **unavailable**, and **unknown**. Unknown
+is never shown as "no".
+
 | | Windows | macOS | Linux/X11 | Linux/Wayland |
 | --- | --- | --- | --- | --- |
-| Enumerate windows | yes | with permission | yes | no |
-| Activate window | yes | with permission | yes | no |
-| Verify focus | yes | with permission | yes | no |
-| Synthetic input | yes | Accessibility permission | yes | restricted (XWayland clients at best) |
-| Global stop hotkey | yes | Input Monitoring permission | yes | no |
+| Enumerate windows | available | Accessibility permission | available | restricted — XWayland (X11) clients only |
+| Activate window | available | Accessibility permission | available | unavailable |
+| Verify focus | available | Accessibility permission | available | unavailable |
+| Synthetic input | available | Accessibility permission | available | restricted — reaches X11 clients only |
+| Global stop hotkey | available | **Input Monitoring** permission | available | unavailable |
+| Multi-monitor | available | restricted (logical points) | restricted (scale unreported) | restricted |
 
-macOS requires Accessibility permission for the host application; without it,
-input and window control silently do nothing, so the app reports the missing
-permission instead of pretending to work. Wayland restricts window control and
-global input injection by design — the app says so, and the on-screen emergency
-stop always works regardless.
+### How verified is this?
 
-These capability tables describe what each platform *allows*. Real end-to-end
-input behaviour on Windows, macOS and X11 has not been verified on those
-systems yet; that is Phase 3.
+Honest answer, per platform:
+
+| | What has actually been executed |
+| --- | --- |
+| **Ubuntu Wayland** | Read-only checks on Ubuntu 26.04 GNOME/Wayland+XWayland: window enumeration, PIDs, focus reading, monitor layout, key translation. **No input was injected.** |
+| **Ubuntu X11** | Not tested — no native X11 session was available. |
+| **macOS** | Not tested. Permission model implemented from Apple's documented behaviour; the `Key.INSERT` gap was verified from pynput's source. |
+| **Windows** | Not tested. |
+
+`docs/PHASE3-PLATFORM-REPORT.md` records exactly what was run, what was found
+(including two real library defects), and a manual checklist for verifying a
+platform you do have.
+
+**Supported** = the capability is modelled, wired and unit tested.
+**Best effort** = implemented but not executed on that OS.
+**Restricted by the OS security model** = Wayland window control and global
+input, and anything on macOS before its permission is granted. Those are not
+worked around.
+
+macOS requires **two** permissions: Accessibility (for input and window
+control) and Input Monitoring (for the global emergency-stop hotkey). Holding
+one does not grant the other, so the app reports them separately, tells you
+which settings pane grants each, and tells you a restart is needed afterwards.
+
+### Keyboard layouts
+
+Typing text is intended to be layout-independent; pressing a *character* key
+and the final key of a shortcut are layout-dependent (they press the physical
+key that produces that character on the active layout). Named keys (`enter`,
+`f5`, …) are layout-independent. None of this has been verified on a non-US
+layout yet — see the report, §8.
+
+### Coordinates
+
+Coordinates are passed to the OS unchanged; the app performs no DPI conversion.
+The coordinate space is reported (`physical` on Windows/X11, `logical` on
+macOS) rather than assumed, per-monitor scaling is shown as unknown when the
+backend will not report it, and coordinates that land on no monitor are
+rejected before a run instead of moving the pointer somewhere unexpected.
+Behaviour on scaled displays (Windows 150%, macOS Retina) is unverified.
 
 ## Development
 
 ```bash
-pytest                                     # 253 tests with the gui extra, 187 without
+pytest                                     # 398 tests with the gui extra, 332 without
+pytest -m manual                           # host-dependent checks, opt-in
 ruff check .
 mypy src
 mypy src tests
 python -m human_input_automation --check
+python -m human_input_automation --diagnose
 ```
 
 Qt tests use the `offscreen` platform plugin (set automatically in
@@ -161,5 +228,9 @@ Qt tests use the `offscreen` platform plugin (set automatically in
 three Qt modules skip themselves. No test needs a real desktop, display server
 or OS permission.
 
+Tests that need a real desktop are marked (`manual`, `windows`, `macos`,
+`linux`, `x11`, `wayland`) and excluded from the default run.
+
 See `docs/ARCHITECTURE.md` for the layering, the Qt threading rule and the
-design decisions, `docs/ROADMAP.md` for what comes next.
+design decisions, `docs/PHASE3-PLATFORM-REPORT.md` for what has actually been
+verified on real hardware, and `docs/ROADMAP.md` for what comes next.

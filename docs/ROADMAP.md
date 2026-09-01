@@ -53,20 +53,45 @@
 - [x] Qt tests on the `offscreen` platform; they skip when the `gui` extra is
       absent, so the suite still runs without Qt
 
-## Phase 3 — Platform adapters
+## Phase 3 — Platform adapters (partially done; verification incomplete)
 
-- [ ] Windows: verify pywinctl handles; consider `pywin32` behind the ports for
-      `SetForegroundWindow` edge cases and per-window input
-- [ ] macOS: Accessibility permission prompt and diagnostics; verify activation
-      through the Accessibility APIs; verify Input Monitoring for the hotkey
-- [ ] Linux/X11: verify enumeration, activation and focus checks under common
-      window managers
-- [ ] Wayland: portal-based diagnostics, and a clear, honest "unsupported here"
-      path instead of silent failure
-- [ ] Per-key layout handling (non-US keyboard layouts) in the input adapter
-- [ ] Multi-monitor coordinate handling and screen-bounds validation for
-      absolute mouse coordinates
-- [ ] Manual verification checklist per platform (cannot run in CI)
+Done:
+
+- [x] Capability matrix with available / restricted / denied / unknown /
+      unavailable, per platform **and** display server
+- [x] macOS Accessibility and Input Monitoring modelled as separate
+      permissions, each naming its settings pane and the restart requirement
+- [x] Centralised key translation (`adapters/keymap.py`) with per-platform key
+      gaps; `Key.INSERT` on macOS is rejected by validation before a run starts
+- [x] EWMH/X11 window adapter, replacing pywinctl on Linux (pywinctl raises
+      `KeyError: 'id'` on Ubuntu 26.04 GNOME)
+- [x] Every pywinctl and Xlib call wrapped: backend failures become data
+- [x] Window backend chosen from capabilities, not the OS name
+- [x] Screen geometry, coordinate space, and off-screen coordinate validation
+- [x] Deadline-accurate, interruptible mouse movement
+- [x] Mid-run focus re-verification (stop rather than silently redirect)
+- [x] Target lifecycle handling: closed, renamed, restarted, replaced, recycled
+      window ids
+- [x] Adapter resource lifecycle (`AdapterSet.close`)
+- [x] `--diagnose` read-only diagnostics
+- [x] Platform-marked tests (`windows`/`macos`/`linux`/`x11`/`wayland`/`manual`),
+      excluded from the default run
+
+Still open — these need physical machines:
+
+- [ ] Execute the manual checklist in `docs/PHASE3-PLATFORM-REPORT.md` §7 on
+      Windows 10/11, macOS and a native X11 session
+- [ ] Verify window activation actually focuses the selected window on each
+      platform (the critical test; not executed anywhere yet)
+- [ ] Verify synthetic keyboard and mouse input end to end (no input has been
+      injected on any platform)
+- [ ] Verify non-US keyboard layouts (QWERTZ, AZERTY)
+- [ ] Verify Windows display scaling and macOS Retina coordinate behaviour
+- [ ] Verify the global hotkey, including the macOS Input Monitoring prompt
+- [ ] Consider `pywin32` behind the ports if `SetForegroundWindow` edge cases
+      require it
+- [ ] Investigate Wayland portals (`xdg-desktop-portal` RemoteDesktop) as a
+      sanctioned input path, without circumventing any restriction
 
 ## Phase 4 — Profiles and persistence
 

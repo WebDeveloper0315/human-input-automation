@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "human-input-automation"
-version = "0.3.0"
+version = "0.4.0"
 description = "Cross-platform keyboard and mouse automation desktop application"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -18,11 +18,15 @@ dependencies = []
 gui = ["PySide6>=6.7"]
 input = ["pynput>=1.7.7"]
 windows = ["pywinctl>=0.4.1"]
+# EWMH window control on Linux; already a pywinctl dependency, declared here
+# because the X11 adapter imports it directly.
+x11 = ["python-xlib>=0.33; sys_platform == 'linux'"]
 yaml = ["PyYAML>=6.0"]
 desktop = [
   "human-input-automation[gui]",
   "human-input-automation[input]",
   "human-input-automation[windows]",
+  "human-input-automation[x11]",
 ]
 dev = [
   "pytest>=8.0",
@@ -44,8 +48,18 @@ human_input_automation = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config"
+addopts = "-ra --strict-markers --strict-config -m 'not manual'"
 filterwarnings = ["error"]
+# OS-dependent checks are marked, never run in CI, and documented in
+# docs/PHASE3-PLATFORM-REPORT.md. Everything unmarked runs headless anywhere.
+markers = [
+  "windows: requires a real Windows desktop session",
+  "macos: requires a real macOS session (and its permissions)",
+  "linux: requires a real Linux desktop session",
+  "x11: requires a real X11 session",
+  "wayland: requires a real Wayland session",
+  "manual: sends real input or needs a human to observe it; never run in CI",
+]
 
 [tool.ruff]
 line-length = 100
@@ -79,7 +93,15 @@ warn_unreachable = true
 # Third-party desktop libraries ship no type information. They are confined to
 # the adapter layer, which is why the core can stay strictly typed.
 [[tool.mypy.overrides]]
-module = ["pynput.*", "pywinctl.*", "PySide6.*", "ApplicationServices.*"]
+module = [
+  "pynput.*",
+  "pywinctl.*",
+  "pymonctl.*",
+  "Xlib.*",
+  "PySide6.*",
+  "ApplicationServices.*",
+  "Quartz.*",
+]
 ignore_missing_imports = true
 
 # Qt classes are untyped from mypy's point of view; subclassing them is fine.

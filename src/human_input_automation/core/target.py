@@ -23,6 +23,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 
+from .capabilities import Capability, CapabilityMatrix, CapabilityName, CapabilityState
+from .keys import Key
+
 #: Sentinel handle for "whatever window currently has focus".
 FOCUSED_WINDOW_HANDLE = "<focused>"
 
@@ -65,6 +68,35 @@ class WindowCapabilities:
     def unknown(cls) -> WindowCapabilities:
         """Capabilities for a target whose platform support was not probed."""
         return cls(notes=("capabilities were not probed",))
+
+    @classmethod
+    def from_matrix(cls, matrix: CapabilityMatrix) -> WindowCapabilities:
+        """Collapse a capability matrix into the booleans the engine gates on.
+
+        ``UNKNOWN`` counts as permitted - the engine attempts the operation and
+        aborts if it fails - except for focus verification, which is only
+        claimed when it is certain.
+        """
+        denied = [
+            capability
+            for capability in matrix
+            if capability.state is CapabilityState.DENIED and capability.permission
+        ]
+        notes = tuple(
+            capability.reason
+            for capability in matrix
+            if capability.reason and capability.state is not CapabilityState.AVAILABLE
+        )
+        return cls(
+            can_enumerate=matrix.is_permitted(CapabilityName.WINDOW_ENUMERATION),
+            can_activate=matrix.is_permitted(CapabilityName.WINDOW_ACTIVATION),
+            can_verify_focus=(
+                matrix.state(CapabilityName.FOCUS_VERIFICATION) is CapabilityState.AVAILABLE
+            ),
+            can_send_synthetic_input=matrix.is_permitted(CapabilityName.KEYBOARD_INPUT),
+            requires_permission=denied[0].permission if denied else None,
+            notes=tuple(dict.fromkeys(notes)),
+        )
 
     @classmethod
     def full(cls) -> WindowCapabilities:
@@ -152,7 +184,20 @@ class PlatformReport:
     capabilities: WindowCapabilities
     missing_permissions: tuple[str, ...] = field(default_factory=tuple)
     warnings: tuple[str, ...] = field(default_factory=tuple)
+    #: Per-capability detail. The boolean ``capabilities`` above are derived
+    #: from this; the matrix is what the UI and ``--diagnose`` display.
+    matrix: CapabilityMatrix = field(default_factory=CapabilityMatrix)
+    #: Named keys this platform's input backend cannot send at all. Filled in by
+    #: the adapter layer; validation rejects plans that use them *before* a run
+    #: starts, rather than failing halfway through.
+    unsupported_keys: tuple[Key, ...] = field(default_factory=tuple)
 
     @property
     def can_automate(self) -> bool:
         return self.capabilities.can_send_synthetic_input
+
+    def capability(self, name: CapabilityName) -> Capability:
+        return self.matrix.get(name)
+
+    def state_of(self, name: CapabilityName) -> CapabilityState:
+        return self.matrix.state(name)
