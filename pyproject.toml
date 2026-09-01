@@ -4,20 +4,28 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "human-input-automation"
-version = "0.1.0"
+version = "0.2.0"
 description = "Cross-platform keyboard and mouse automation desktop application"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
-dependencies = [
-  "PySide6>=6.7",
-  "pynput>=1.7.7",
-  "pywinctl>=0.4.1",
-  "PyYAML>=6.0",
-]
+
+# The core is deliberately dependency-free: it must import and be testable on a
+# headless machine. Everything that touches a real desktop is an extra.
+dependencies = []
 
 [project.optional-dependencies]
+gui = ["PySide6>=6.7"]
+input = ["pynput>=1.7.7"]
+windows = ["pywinctl>=0.4.1"]
+yaml = ["PyYAML>=6.0"]
+desktop = [
+  "human-input-automation[gui]",
+  "human-input-automation[input]",
+  "human-input-automation[windows]",
+]
 dev = [
   "pytest>=8.0",
-  "pytest-qt>=4.4",
   "ruff>=0.6",
   "mypy>=1.10",
 ]
@@ -27,14 +35,55 @@ human-input-automation = "human_input_automation.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+namespaces = false
+
+# PEP 561 marker: the package ships type information, so downstream code (and
+# the test suite) type-checks against the installed package.
+[tool.setuptools.package-data]
+human_input_automation = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",    # pycodestyle errors
+  "W",    # pycodestyle warnings
+  "F",    # pyflakes
+  "I",    # import sorting
+  "B",    # bugbear
+  "UP",   # pyupgrade
+  "SIM",  # simplifications
+  "RUF",  # ruff-specific
+]
+ignore = [
+  "B008",  # function call in default argument - not used here, avoids false positives
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B017"]  # tests intentionally assert on broad exception types
 
 [tool.mypy]
 python_version = "3.11"
 strict = true
+files = ["src", "tests"]
+warn_unreachable = true
+
+# Third-party desktop libraries ship no type information. They are confined to
+# the adapter layer, which is why the core can stay strictly typed.
+[[tool.mypy.overrides]]
+module = ["pynput.*", "pywinctl.*", "PySide6.*", "ApplicationServices.*"]
+ignore_missing_imports = true
+
+# Qt classes are untyped from mypy's point of view; subclassing them is fine.
+[[tool.mypy.overrides]]
+module = ["human_input_automation.ui.*", "human_input_automation.app"]
+disallow_subclassing_any = false
+disallow_untyped_calls = false
