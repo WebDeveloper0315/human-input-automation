@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "human-input-automation"
+version = "0.1.0"
+description = "Cross-platform keyboard and mouse automation desktop application"
+requires-python = ">=3.11"
+dependencies = [
+  "PySide6>=6.7",
+  "pynput>=1.7.7",
+  "pywinctl>=0.4.1",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-qt>=4.4",
+  "ruff>=0.6",
+  "mypy>=1.10",
+]
+
+[project.scripts]
+human-input-automation = "human_input_automation.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
