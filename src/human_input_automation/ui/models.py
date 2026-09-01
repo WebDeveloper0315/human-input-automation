@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import Any
 
 from ..adapters.hotkeys import HotkeySupport
+from ..application.profiles import LoadedProfile, ProfileState
 from ..core.actions import (
     Action,
     KeyDown,
@@ -374,6 +375,73 @@ def active_target_text(target: TargetWindow | None, *, available: bool = True) -
         return "Active target: none selected - choose a window before starting."
     suffix = "" if available else "  [UNAVAILABLE - the window may have closed]"
     return f"Active target: {target.describe()}{suffix}"
+
+
+# ---------------------------------------------------------------------------
+# Profiles
+# ---------------------------------------------------------------------------
+
+
+class UnsavedChoice(StrEnum):
+    """What the user chose when told about unsaved changes."""
+
+    SAVE = "save"
+    DISCARD = "discard"
+    CANCEL = "cancel"
+
+
+@dataclass(frozen=True)
+class TargetStatusView:
+    """How a loaded profile's target state should be shown."""
+
+    symbol: str
+    headline: str
+    detail: str = ""
+    can_run: bool = False
+
+    def as_text(self) -> str:
+        return f"{self.symbol} {self.headline}"
+
+
+#: One line per state, so the user learns *which* problem it is.
+_TARGET_HEADLINES: dict[ProfileState, tuple[str, str]] = {
+    ProfileState.TARGET_RESOLVED: ("OK", "Target resolved"),
+    ProfileState.TARGET_UNRESOLVED: ("!", "Target not found"),
+    ProfileState.TARGET_AMBIGUOUS: ("!", "Multiple matching windows"),
+    ProfileState.TARGET_CAPABILITY_BLOCKED: ("X", "Required capability unavailable"),
+    ProfileState.PROFILE_INVALID: ("X", "Profile cannot run"),
+    ProfileState.PROFILE_VALID: ("?", "Target not resolved yet"),
+}
+
+
+def target_status_view(loaded: LoadedProfile | None) -> TargetStatusView:
+    """Describe a profile's runnability. ``None`` means no profile is loaded."""
+    if loaded is None:
+        return TargetStatusView("-", "No profile loaded", "Select or create a profile.")
+    symbol, headline = _TARGET_HEADLINES.get(loaded.state, ("?", "Unknown state"))
+    return TargetStatusView(
+        symbol=symbol,
+        headline=headline,
+        detail=loaded.message,
+        can_run=loaded.is_runnable,
+    )
+
+
+def profile_title(name: str | None, *, dirty: bool) -> str:
+    """Profile name with an asterisk when there are unsaved changes."""
+    label = name or "Untitled profile"
+    return f"{label} *" if dirty else label
+
+
+def profile_choices(summaries: Sequence[object]) -> list[tuple[str, str]]:
+    """``(id, label)`` pairs for the profile picker, unreadable files marked."""
+    choices: list[tuple[str, str]] = []
+    for summary in summaries:
+        identifier = str(getattr(summary, "id", ""))
+        name = str(getattr(summary, "name", identifier))
+        readable = bool(getattr(summary, "is_readable", True))
+        choices.append((identifier, name if readable else f"{name} (unreadable)"))
+    return choices
 
 
 # ---------------------------------------------------------------------------

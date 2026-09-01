@@ -21,6 +21,7 @@ from ..core.screen import ScreenGeometry
 from ..core.target import DisplayServer, PlatformName, PlatformReport, TargetWindow
 from ..core.validation import validate_plan
 from ..ports.hotkeys import HotkeyPort
+from .profiles import LoadedProfile, Profile, ProfileService
 from .runner import AutomationRunner
 
 
@@ -48,8 +49,10 @@ class AutomationService:
         adapters: AdapterSet | None = None,
         *,
         countdown_tick_seconds: float = 1.0,
+        profiles: ProfileService | None = None,
     ) -> None:
         self._adapters = adapters or build_adapters()
+        self._profiles = profiles or ProfileService()
         self._engine = AutomationEngine(
             keyboard=self._adapters.keyboard,
             mouse=self._adapters.mouse,
@@ -132,6 +135,22 @@ class AutomationService:
             platform=self.host.platform,
             display_server=self.host.display_server,
             capabilities=self.host.capabilities,
+        )
+
+    # -- profiles ----------------------------------------------------------
+    @property
+    def profiles(self) -> ProfileService:
+        """Profile storage and resolution. Nothing here sends input."""
+        return self._profiles
+
+    def prepare_profile(self, profile: Profile) -> LoadedProfile:
+        """Resolve a profile's target against the live windows and validate it.
+
+        Read-only: it enumerates windows and checks the plan, and never starts
+        automation. The caller still has to press Start.
+        """
+        return self._profiles.prepare(
+            profile, self.discover_targets().targets, self.host, self.screen
         )
 
     # -- running -----------------------------------------------------------

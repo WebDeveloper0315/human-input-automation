@@ -80,6 +80,7 @@ jobs:
           import sys
           import human_input_automation.core  # noqa: F401
           import human_input_automation.application  # noqa: F401
+          import human_input_automation.application.profiles  # noqa: F401
           import human_input_automation.diagnostics  # noqa: F401
           forbidden = [m for m in ("PySide6", "pynput", "pywinctl", "Xlib") if m in sys.modules]
           raise SystemExit(f"core pulled in {forbidden}" if forbidden else 0)
@@ -90,6 +91,26 @@ jobs:
       - name: --diagnose must work headless and send no input
         shell: bash
         run: python -m human_input_automation --diagnose || test $? -eq 1
+      - name: profile commands must work headless without the gui extra
+        shell: bash
+        run: |
+          python -m human_input_automation --profiles
+          python - <<'PY'
+          import json, pathlib, tempfile
+          from human_input_automation.application.profiles import (
+              ProfileRepository, ProfileService,
+          )
+          from human_input_automation.core.actions import TypeText
+          from human_input_automation.core.plan import AutomationPlan
+          from human_input_automation.core.target import TargetWindow
+          with tempfile.TemporaryDirectory() as directory:
+              service = ProfileService(ProfileRepository(directory))
+              plan = AutomationPlan(TargetWindow(handle="x"), [TypeText(text="hi")])
+              profile = service.save(service.build("CI", plan, TargetWindow(handle="x")))
+              exported = service.export(profile, pathlib.Path(directory) / "p.json")
+              assert json.loads(exported.read_text())["schema"] == 1
+              print("profile round-trip OK")
+          PY
 
   packaging:
     name: build wheel
@@ -113,6 +134,11 @@ jobs:
               "human_input_automation/application/service.py",
               "human_input_automation/ui/main_window.py",
               "human_input_automation/ui/models.py",
+              "human_input_automation/ui/profile_panel.py",
+              "human_input_automation/application/profiles/schema.py",
+              "human_input_automation/application/profiles/serialization.py",
+              "human_input_automation/application/profiles/repository.py",
+              "human_input_automation/application/profiles/resolver.py",
               "human_input_automation/py.typed",
           ]
           missing = [name for name in expected if name not in names]

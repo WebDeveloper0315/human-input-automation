@@ -3,11 +3,11 @@
 Cross-platform desktop automation for keyboard and mouse input, inspired by
 AutoIt. Windows, macOS and Ubuntu/Linux.
 
-**Status:** Phase 3 — the automation core, a working desktop UI, and hardened
-platform adapters with an honest capability model. **Real end-to-end input has
-not yet been verified on Windows, macOS or a native X11 session**; see
-"Platform support" below and `docs/PHASE3-PLATFORM-REPORT.md`. Profile
-persistence is Phase 4 (`docs/ROADMAP.md`).
+**Status:** Phase 4 — the automation core, a desktop UI, hardened platform
+adapters with an honest capability model, and saved profiles with target
+re-resolution. **Real end-to-end input has still not been verified on Windows,
+macOS or a native X11 session**; see "Platform support" below and
+`docs/PHASE3-PLATFORM-REPORT.md`.
 
 ## What it does
 
@@ -25,6 +25,10 @@ persistence is Phase 4 (`docs/ROADMAP.md`).
   sending any input
 - A run log of structured events, and a capability banner that says what this
   machine can actually do
+- **Saved profiles**: store a plan and its target, reload it after a restart,
+  duplicate, import and export. Profiles remember *which application* they
+  target, not a window handle, so they still find it after the app restarts —
+  and when they cannot, they say so instead of typing somewhere else
 
 ### What it deliberately does not do
 
@@ -53,6 +57,8 @@ three).
 python -m human_input_automation             # desktop UI (needs the gui extra)
 python -m human_input_automation --check     # short capability summary, headless
 python -m human_input_automation --diagnose  # full platform report, sends no input
+python -m human_input_automation --profiles  # list saved profiles
+python -m human_input_automation --validate-profile p.json   # validate, never run
 python -m human_input_automation --verbose   # add diagnostic logging
 ```
 
@@ -123,6 +129,34 @@ use the on-screen emergency stop.
 While a run is in flight the target list, action editor and timing fields lock,
 so the plan cannot change under a running engine. The emergency stop stays
 enabled in every state, including during the countdown and while paused.
+
+## Profiles
+
+Profiles are JSON files in your platform's application data directory
+(`%APPDATA%`, `~/Library/Application Support`, or `$XDG_DATA_HOME`), one file
+per profile, written atomically.
+
+A profile stores the plan plus a **durable identity** for its target — platform,
+application id, process name and window title — never a window handle, process
+id or capability snapshot, because those expire the moment the application
+closes. When you load a profile the app looks for that application again and
+tells you exactly what it found:
+
+```
+OK  Target resolved            Editor - Notes  (Start enabled)
+!   Target not found           org.example.editor is not currently running.
+!   Multiple matching windows  3 windows match. Select the intended window.
+X   Required capability unavailable
+```
+
+Only a resolved target enables Start. If several windows match, the app asks —
+it never picks one for you, and it never falls back to whatever window happens
+to be focused. Loading, importing, validating and resolving a profile never send
+input; only pressing Start does.
+
+Profiles are pure data: there is no command, script or shell field, and unknown
+action types are rejected rather than ignored. See `docs/PROFILE-FORMAT.md` for
+the schema, the matching rules and the security model.
 
 ## Using the core directly
 
@@ -214,13 +248,14 @@ Behaviour on scaled displays (Windows 150%, macOS Retina) is unverified.
 ## Development
 
 ```bash
-pytest                                     # 398 tests with the gui extra, 332 without
+pytest                                     # 615 tests with the gui extra, 519 without
 pytest -m manual                           # host-dependent checks, opt-in
 ruff check .
 mypy src
 mypy src tests
 python -m human_input_automation --check
 python -m human_input_automation --diagnose
+python -m human_input_automation --profiles
 ```
 
 Qt tests use the `offscreen` platform plugin (set automatically in
@@ -232,5 +267,6 @@ Tests that need a real desktop are marked (`manual`, `windows`, `macos`,
 `linux`, `x11`, `wayland`) and excluded from the default run.
 
 See `docs/ARCHITECTURE.md` for the layering, the Qt threading rule and the
-design decisions, `docs/PHASE3-PLATFORM-REPORT.md` for what has actually been
-verified on real hardware, and `docs/ROADMAP.md` for what comes next.
+design decisions, `docs/PROFILE-FORMAT.md` for the profile schema,
+`docs/PHASE3-PLATFORM-REPORT.md` for what has actually been verified on real
+hardware, and `docs/ROADMAP.md` for what comes next.

@@ -59,6 +59,24 @@ ui -> application -> core <- adapters, with ports/ between core and adapters
   `docs/PHASE3-PLATFORM-REPORT.md` with what you ran. Never upgrade a
   "NOT TESTED" to "PASS" without executing the test.
 
+## Profile rules
+
+* Persistence stays in `application/profiles/`. The core never learns that
+  files exist, and no profile module may import Qt or a platform library.
+* Bump `SCHEMA_VERSION` and add a migration for any change to the stored shape.
+  Never infer the version from which fields are present.
+* Reject unknown fields and unknown action types; never ignore them silently.
+* Profiles are data. Never add a field that names a command, script or path to
+  execute.
+* Store identity (platform, app id, process name, title), never handles, pids,
+  capabilities or focus state as identity.
+* Resolution must be deterministic. Two matches means ambiguous, not "pick the
+  first"; no match means unresolved, never "use the focused window".
+* Load, import, export, validate, resolve and list must remain side-effect free
+  with respect to input. Only Start runs automation.
+* Do not duplicate `validate_plan`; sequence structural checks then call it.
+* Never report a profile as saved when the write failed.
+
 ## Invariants
 
 * Never send input before the target is activated and focus is checked.
@@ -104,6 +122,7 @@ mypy src
 mypy src tests
 python -m human_input_automation --check      # must work headless
 python -m human_input_automation --diagnose  # must work headless, sends no input
+python -m human_input_automation --profiles  # must work headless, sends no input
 ```
 
 All must pass. Do not skip or silence failing tests, and do not weaken strict

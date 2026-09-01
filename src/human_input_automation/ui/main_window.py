@@ -8,10 +8,14 @@ come back. Automation itself always runs on the service's worker thread.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtWidgets import (
+    QFileDialog,
+    QInputDialog,
     QMainWindow,
     QMessageBox,
     QSplitter,
@@ -19,6 +23,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..application.profiles import (
+    LoadedProfile,
+    Profile,
+    ProfileError,
+    ProfileState,
+)
 from ..application.service import AutomationService
 from ..core.events import (
     CountdownStarted,
@@ -28,12 +38,14 @@ from ..core.events import (
     RunStarted,
 )
 from ..core.plan import AutomationPlan, ExecutionLimits, RunOptions
-from ..core.target import TargetWindow
+from ..core.target import TargetWindow, WindowCapabilities
+from ..core.timing import TimingProfile
 from .action_editor import ActionEditor
 from .capability_banner import CapabilityBanner
 from .dry_run_panel import DryRunPanel
 from .models import (
     UiState,
+    UnsavedChoice,
     capability_banner,
     controls_for,
     dry_run_view,
@@ -41,7 +53,11 @@ from .models import (
     friendly_error,
     next_state,
     preview_delays,
+    profile_title,
+    target_status_view,
+    timing_to_values,
 )
+from .profile_panel import ProfilePanel
 from .run_bridge import RunEventBridge
 from .run_controls import RunControls
 from .run_log import RunLog
@@ -59,6 +75,17 @@ class MainWindow(QMainWindow):
         self._state = UiState.IDLE
         self.last_message: tuple[str, str] | None = None
 
+        #: Current profile, whether it has unsaved edits, and what is known
+        #: about its target. ``None`` means "an unsaved profile".
+        self._profile: Profile | None = None
+        self._loaded: LoadedProfile | None = None
+        self._dirty = False
+        #: Set while the UI is being populated from a profile, so applying a
+        #: profile does not look like the user editing one.
+        self._applying = False
+        #: Overridable in tests; the GUI shows a Save/Discard/Cancel dialog.
+        self.unsaved_prompt: Callable[[], UnsavedChoice] | None = None
+
         self.setWindowTitle("Human Input Automation")
         self.resize(1150, 850)
 
@@ -67,6 +94,7 @@ class MainWindow(QMainWindow):
         self.bridge.hotkey_triggered.connect(self._on_hotkey)
 
         self.banner = CapabilityBanner()
+        self.profile_panel = ProfilePanel()
         self.target_panel = TargetPanel()
         self.action_editor = ActionEditor()
         self.timing_panel = TimingPanel()
@@ -79,6 +107,7 @@ class MainWindow(QMainWindow):
 
         self._update_banner()
         self.refresh_targets()
+        self.refresh_profiles()
         self._enable_hotkey()
         self._sync_controls()
 
@@ -107,6 +136,7 @@ class MainWindow(QMainWindow):
         central = QWidget()
         layout = QVBoxLayout(central)
         layout.addWidget(self.banner)
+        layout.addWidget(self.profile_panel)
         layout.addWidget(body, 1)
         layout.addWidget(self.controls)
         self.setCentralWidget(central)
@@ -118,8 +148,17 @@ class MainWindow(QMainWindow):
     def _connect(self) -> None:
         self.target_panel.refresh_requested.connect(self.refresh_targets)
         self.target_panel.target_changed.connect(self._on_target_changed)
-        self.action_editor.actions_changed.connect(self._sync_controls)
-        self.timing_panel.profile_changed.connect(self._sync_controls)
+        self.action_editor.actions_changed.connect(self._on_plan_edited)
+        self.timing_panel.profile_changed.connect(self._on_plan_edited)
+        self.profile_panel.profile_selected.connect(self.load_profile)
+        self.profile_panel.new_requested.connect(self.new_profile)
+        self.profile_panel.save_requested.connect(self.save_profile)
+        self.profile_panel.save_as_requested.connect(self.save_profile_as)
+        self.profile_panel.duplicate_requested.connect(self.duplicate_profile)
+        self.profile_panel.delete_requested.connect(self.delete_profile)
+        self.profile_panel.import_requested.connect(self.import_profile)
+        self.profile_panel.export_requested.connect(self.export_profile)
+        self.profile_panel.resolve_requested.connect(self.resolve_profile_target)
         self.controls.start_requested.connect(self.start_run)
         self.controls.pause_requested.connect(self.pause_run)
         self.controls.resume_requested.connect(self.resume_run)
@@ -150,6 +189,13 @@ class MainWindow(QMainWindow):
     def _on_target_changed(self, target: TargetWindow | None) -> None:
         if target is not None:
             self._log(f"Target selected: {target.describe()}")
+        self._on_plan_edited()
+
+    @Slot()
+    def _on_plan_edited(self) -> None:
+        """Any edit to the plan, timing or target counts as an unsaved change."""
+        if not self._applying:
+            self._set_dirty(True)
         self._sync_controls()
 
     def _check_target_available(self) -> bool:
@@ -159,6 +205,314 @@ class MainWindow(QMainWindow):
         available = self._service.refresh_target(target) is not None
         self.target_panel.set_target_available(available)
         return available
+
+
+    # -- profiles ----------------------------------------------------------
+    @Slot()
+    def refresh_profiles(self) -> None:
+        """Reload the profile list from storage."""
+        try:
+            summaries = self._service.profiles.list()
+        except ProfileError as error:
+            self._show_message("Profiles unavailable", str(error))
+            return
+        self.profile_panel.set_profiles(summaries, self._profile.id if self._profile else None)
+        self._update_profile_display()
+
+    @Slot(str)
+    def load_profile(self, profile_id: str) -> None:
+        """Load a stored profile: read, validate, resolve, then show the result.
+
+        Loading never runs anything, and a profile whose window cannot be found
+        still loads - it simply cannot be started.
+        """
+        if not self._confirm_discard_changes():
+            self.profile_panel.set_profiles(
+                self._service.profiles.list(), self._profile.id if self._profile else None
+            )
+            return
+        try:
+            profile = self._service.profiles.load(profile_id)
+        except ProfileError as error:
+            self._show_message("Could not load the profile", str(error))
+            return
+        self._apply_profile(profile)
+        self._log(f"Profile loaded: {profile.name}")
+        self.resolve_profile_target()
+
+    @Slot()
+    def new_profile(self) -> None:
+        """Start from an empty plan."""
+        if not self._confirm_discard_changes():
+            return
+        self._applying = True
+        try:
+            self._profile = None
+            self._loaded = None
+            self.action_editor.set_actions([])
+            self.timing_panel.set_values(timing_to_values(TimingProfile()))
+        finally:
+            self._applying = False
+        self._set_dirty(False)
+        self.refresh_profiles()
+        self._log("New profile")
+
+    @Slot()
+    def save_profile(self) -> None:
+        """Save over the current profile, or create one if there is none."""
+        if self._profile is None:
+            self.save_profile_as()
+            return
+        self._store(self._build_profile(self._profile.name, self._profile.id))
+
+    @Slot()
+    def save_profile_as(self, name: str | None = None) -> None:
+        """Save the current configuration as a new profile."""
+        chosen = name or self._ask_for_name(self._profile.name if self._profile else "New profile")
+        if not chosen:
+            return
+        self._store(self._build_profile(chosen, None))
+
+    @Slot()
+    def duplicate_profile(self) -> None:
+        if self._profile is None:
+            self._show_message("Nothing to duplicate", "Save this profile first.")
+            return
+        current = self._build_profile(self._profile.name, self._profile.id)
+        copy = self._service.profiles.duplicate(current)
+        self._store(copy)
+
+    @Slot()
+    def delete_profile(self) -> None:
+        if self._profile is None:
+            self._show_message("Nothing to delete", "This profile has not been saved yet.")
+            return
+        if not self._confirm_delete(self._profile.name):
+            return
+        try:
+            self._service.profiles.delete(self._profile.id)
+        except ProfileError as error:
+            self._show_message("Could not delete the profile", str(error))
+            return
+        self._log(f"Profile deleted: {self._profile.name}")
+        self._profile = None
+        self._loaded = None
+        self._set_dirty(False)
+        self.refresh_profiles()
+
+    @Slot()
+    def import_profile(self, path: str | None = None) -> None:
+        """Import a profile file. Importing never executes it."""
+        chosen = path or self._ask_for_open_path()
+        if not chosen:
+            return
+        try:
+            profile = self._service.profiles.import_file(chosen)
+        except ProfileError as error:
+            self._show_message("Could not import the profile", str(error))
+            return
+        self._log(f"Profile imported: {profile.name}")
+        self._apply_profile(profile)
+        self.refresh_profiles()
+        self.resolve_profile_target()
+
+    @Slot()
+    def export_profile(self, path: str | None = None) -> None:
+        if self._profile is None:
+            self._show_message("Nothing to export", "Save this profile first.")
+            return
+        chosen = path or self._ask_for_save_path(self._profile.name)
+        if not chosen:
+            return
+        try:
+            current = self._build_profile(self._profile.name, self._profile.id)
+            self._service.profiles.export(current, chosen)
+        except ProfileError as error:
+            self._show_message("Could not export the profile", str(error))
+            return
+        self._log(f"Profile exported to {chosen}")
+
+    @Slot()
+    def resolve_profile_target(self) -> None:
+        """Look for the profile's window and report what was found.
+
+        Read-only: it enumerates windows and validates the plan. It never
+        substitutes a different application, and never starts a run.
+        """
+        if self._profile is None:
+            self._loaded = None
+            self._update_profile_display()
+            return
+        profile = self._build_profile(self._profile.name, self._profile.id)
+        loaded = self._service.prepare_profile(profile)
+        self._loaded = loaded
+        self._log(f"Target: {loaded.message or loaded.state.value}")
+
+        self._applying = True
+        try:
+            if loaded.state is ProfileState.TARGET_RESOLVED and loaded.target is not None:
+                self.refresh_targets()
+                self.target_panel.select_handle(loaded.target.handle)
+            else:
+                # Never leave a stale selection behind: an unresolved profile
+                # must not be runnable against whatever was selected before.
+                self.target_panel.clear_selection()
+        finally:
+            self._applying = False
+        self._update_profile_display()
+        self._sync_controls()
+
+    # -- profile helpers ---------------------------------------------------
+    def _build_profile(self, name: str, profile_id: str | None) -> Profile:
+        """Capture the current UI state as a profile (does not save it)."""
+        plan = AutomationPlan(
+            target=self.target_panel.selected_target
+            or TargetWindow(handle="", capabilities=WindowCapabilities()),
+            actions=self.action_editor.plan_actions,
+            timing=self.timing_panel.profile() or TimingProfile(),
+            limits=ExecutionLimits(),
+            options=RunOptions(seed=self.timing_panel.seed),
+            name=name,
+        )
+        existing = self._profile
+        identity_source = self.target_panel.selected_target
+        profile = self._service.profiles.build(
+            name,
+            plan,
+            identity_source,
+            profile_id=profile_id,
+            description=existing.description if existing else "",
+        )
+        if identity_source is None and existing is not None:
+            # Keep the saved identity when no window is currently selected, so
+            # saving an edit to an unresolved profile does not erase its target.
+            profile = profile.with_changes(target=existing.target)
+        return profile
+
+    def _apply_profile(self, profile: Profile) -> None:
+        """Populate the editors from a profile without marking them dirty."""
+        self._applying = True
+        try:
+            self._profile = profile
+            self._loaded = None
+            plan = profile.plan
+            if plan is not None:
+                self.action_editor.set_actions(plan.actions)
+                self.timing_panel.set_values(timing_to_values(plan.timing))
+                seed = plan.options.seed
+                self.timing_panel.seed_check.setChecked(seed is not None)
+                if seed is not None:
+                    self.timing_panel.seed_spin.setValue(seed)
+            self.target_panel.clear_selection()
+        finally:
+            self._applying = False
+        self._set_dirty(False)
+        self._update_profile_display()
+
+    def _store(self, profile: Profile) -> None:
+        """Save a profile, and only clear the dirty flag if it really worked."""
+        try:
+            saved = self._service.profiles.save(profile)
+        except ProfileError as error:
+            self._set_dirty(True)
+            self._show_message("Could not save the profile", str(error))
+            return
+        self._profile = saved
+        self._set_dirty(False)
+        self._log(f"Profile saved: {saved.name}")
+        self.refresh_profiles()
+
+    def _set_dirty(self, dirty: bool) -> None:
+        self._dirty = dirty
+        self._update_profile_display()
+
+    def _update_profile_display(self) -> None:
+        name = self._profile.name if self._profile else None
+        self.profile_panel.set_current(name, dirty=self._dirty)
+        self.profile_panel.set_status(target_status_view(self._loaded))
+        self.setWindowTitle(f"Human Input Automation - {profile_title(name, dirty=self._dirty)}")
+
+    @property
+    def profile(self) -> Profile | None:
+        return self._profile
+
+    @property
+    def loaded_profile(self) -> LoadedProfile | None:
+        return self._loaded
+
+    @property
+    def is_dirty(self) -> bool:
+        return self._dirty
+
+    # -- prompts (overridable so tests never open a modal dialog) ----------
+    def _confirm_discard_changes(self) -> bool:
+        """Returns False when the user cancelled the operation."""
+        if not self._dirty:
+            return True
+        choice = self._ask_unsaved()
+        if choice is UnsavedChoice.CANCEL:
+            return False
+        if choice is UnsavedChoice.SAVE:
+            self.save_profile()
+            return not self._dirty
+        return True
+
+    def _ask_unsaved(self) -> UnsavedChoice:
+        if self.unsaved_prompt is not None:
+            return self.unsaved_prompt()
+        if not self._show_dialogs:
+            # No way to ask: keep the user's work rather than discarding it.
+            return UnsavedChoice.CANCEL
+        box = QMessageBox(self)
+        box.setWindowTitle("Unsaved changes")
+        name = profile_title(self._profile.name if self._profile else None, dirty=False)
+        box.setText(f"Save changes to {name}?")
+        box.setStandardButtons(
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel
+        )
+        answer = box.exec()
+        if answer == QMessageBox.StandardButton.Save:
+            return UnsavedChoice.SAVE
+        if answer == QMessageBox.StandardButton.Discard:
+            return UnsavedChoice.DISCARD
+        return UnsavedChoice.CANCEL
+
+    def _confirm_delete(self, name: str) -> bool:
+        if not self._show_dialogs:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Delete profile",
+            f"Delete the profile {name!r}? This cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _ask_for_name(self, suggestion: str) -> str | None:
+        if not self._show_dialogs:
+            return suggestion
+        name, accepted = QInputDialog.getText(
+            self, "Save profile as", "Profile name:", text=suggestion
+        )
+        return name.strip() if accepted and name.strip() else None
+
+    def _ask_for_open_path(self) -> str | None:
+        if not self._show_dialogs:
+            return None
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import profile", "", "Profile files (*.json);;All files (*)"
+        )
+        return path or None
+
+    def _ask_for_save_path(self, name: str) -> str | None:
+        if not self._show_dialogs:
+            return None
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export profile", f"{name}.json", "Profile files (*.json);;All files (*)"
+        )
+        return path or None
 
     # -- plan --------------------------------------------------------------
     def build_plan(self, *, dry_run: bool = False) -> AutomationPlan | None:
@@ -319,6 +673,7 @@ class MainWindow(QMainWindow):
         self.target_panel.set_locked(not state.editing_enabled)
         self.action_editor.set_locked(not state.editing_enabled)
         self.timing_panel.set_locked(not state.editing_enabled)
+        self.profile_panel.set_locked(not state.editing_enabled)
 
     @property
     def state(self) -> UiState:
@@ -336,10 +691,19 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, title, text)
 
     # -- Qt ----------------------------------------------------------------
-    def closeEvent(self, event: object) -> None:  # Qt naming convention
-        """Stop automation and release the hotkey before the window goes away."""
+    def closeEvent(self, event: Any) -> None:  # Qt naming convention
+        """Offer to save, stop automation, then release adapter resources.
+
+        Cancelling the unsaved-changes prompt cancels the close: unsaved work is
+        never discarded silently.
+        """
+        if not self._confirm_discard_changes():
+            ignore = getattr(event, "ignore", None)
+            if callable(ignore):
+                ignore()
+            return
         if self._service.is_running:
             self._service.emergency_stop()
             self._service.join(2.0)
         self._service.close()
-        super().closeEvent(event)  # type: ignore[arg-type]
+        super().closeEvent(event)

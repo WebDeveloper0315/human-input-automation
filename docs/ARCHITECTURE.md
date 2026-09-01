@@ -59,9 +59,15 @@ same name and confuses packaging and analysis tools.
 | `adapters/hotkeys.py` | Hotkey capability reporting and the null hotkey |
 | `application/runner.py` | Worker thread, pre-run countdown, event fan-out |
 | `application/service.py` | Facade used by the UI |
+| `application/profiles/schema.py` | `Profile`, `TargetIdentity`, schema version, failure states |
+| `application/profiles/serialization.py` | Pure dict conversion, strict decoding, migrations |
+| `application/profiles/repository.py` | Atomic JSON storage in the platform data directory |
+| `application/profiles/resolver.py` | Finding a saved target again, deterministically |
+| `application/profiles/service.py` | Storage + resolution + existing validation |
 | `ui/models.py` | **Qt-free** presentation logic: run-state machine, control enablement, capability banner, action/timing forms, log and error formatting |
 | `ui/run_bridge.py` | The single worker-thread → Qt-thread boundary |
-| `ui/main_window.py` | Window assembly and service wiring |
+| `ui/main_window.py` | Window assembly, service wiring, unsaved-change tracking |
+| `ui/profile_panel.py` | Profile picker, New/Save/Duplicate/Delete/Import/Export |
 | `ui/target_panel.py` | Window list, selection, active-target indicator |
 | `ui/action_editor.py` | Action list plus the generated per-action dialog |
 | `ui/timing_panel.py` | Timing profile fields, seed and live preview |
@@ -226,6 +232,44 @@ rather than blocking a run.
   to the backend as one uninterruptible call. See
   `docs/PHASE3-PLATFORM-REPORT.md` §6.
 
+## Profiles
+
+Persistence lives in `application/profiles/`, never in the core: the engine has
+no idea files exist. Nothing in the package imports Qt or a platform library, so
+serialization works headless and is trivially testable.
+
+```
+JSON file
+   ↓ serialization (pure, strict)      structural validation
+Profile
+   ↓ resolver (live window list)       TARGET_RESOLVED / UNRESOLVED /
+   ↓                                   AMBIGUOUS / CAPABILITY_BLOCKED
+AutomationPlan + resolved TargetWindow
+   ↓ validate_plan (existing)          domain validation
+runnable
+```
+
+Three rules shape the design:
+
+* **A profile stores identity, not handles.** Window ids, process ids, focus
+  state and capabilities are runtime facts that expire when the application
+  closes. Profiles store platform, application id, process name and title; a
+  saved handle is kept only as a hint the resolver accepts when the window it
+  points at also matches the application.
+* **Ambiguity is reported, never resolved.** Two matching windows produce
+  `TARGET_AMBIGUOUS` and no plan. The focused window is never a fallback,
+  because typing into the wrong application is the worst outcome this program
+  has.
+* **Loading is inert.** Load, import, export, validate, resolve and list are
+  side-effect free with respect to input; only the existing Start path runs
+  anything. `tests/test_profile_service.py` proves it with a keyboard adapter
+  that fails the test if it is ever called.
+
+Domain validation is not duplicated: the profile layer sequences its own
+structural checks and then hands the plan to the existing `validate_plan`.
+See `docs/PROFILE-FORMAT.md` for the schema, matching priority and security
+model.
+
 ## Threading and the Qt boundary
 
 `AutomationEngine.run()` blocks, by design: it is a pure, testable loop.
@@ -365,7 +409,7 @@ imported, and left to manual/Phase 3 verification on real hardware.
 | pywinctl | keep for Windows/macOS, `[windows]` extra | Wraps Win32 and the macOS Accessibility APIs. **Not used on Linux**: its Linux path raises `KeyError: 'id'` on Ubuntu 26.04 GNOME (reproduced), so Linux uses the EWMH adapter instead. |
 | python-xlib | added, `[x11]` extra (Linux only) | Already a pywinctl dependency. Drives the EWMH window adapter that replaces pywinctl on Linux. |
 | pymonctl | used via pywinctl, no new requirement | Monitor layout for coordinate validation. |
-| PyYAML | moved to `[yaml]` extra, unused for now | Profiles are not implemented yet, and `json` from the standard library covers them. YAML stays available if human-editable profiles are wanted later. |
+| PyYAML | still optional, still unused | Profiles use standard-library `json`. YAML remains available behind the `[yaml]` extra if human-authored profiles ever want it; nothing requires it. |
 
 The core itself has **no runtime dependencies**: `pip install -e ".[dev]"`
 installs pytest, ruff and mypy only, which is why CI is fast and headless.

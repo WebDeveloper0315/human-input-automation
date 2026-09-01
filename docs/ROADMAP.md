@@ -93,13 +93,30 @@ Still open — these need physical machines:
 - [ ] Investigate Wayland portals (`xdg-desktop-portal` RemoteDesktop) as a
       sanctioned input path, without circumventing any restriction
 
-## Phase 4 — Profiles and persistence
+## Phase 4 — Profiles and persistence (done)
 
-- [ ] JSON serialisation for `AutomationPlan` (stdlib only)
-- [ ] Save/load/rename profiles, with schema versioning
-- [ ] Optional YAML import/export behind the `[yaml]` extra
-- [ ] Target re-resolution on load (handles change between sessions)
-- [ ] Recent-profile list and unsaved-change prompts in the UI
+- [x] Versioned schema (`"schema": 1`), never inferred, newer versions rejected
+      explicitly; migration registry in place for a future version 2
+- [x] Pure serialization: no filesystem, Qt or OS access; lossless generic
+      encoding with strict explicit decoding
+- [x] Unknown action types and unknown fields rejected with named errors
+- [x] Persistent `TargetIdentity` (platform, app id, process name, title,
+      pattern) separated from transient handles, pids and capabilities
+- [x] Deterministic target resolver; ambiguity reported, never guessed; the
+      focused window is never a fallback
+- [x] Explicit states: `PROFILE_VALID`, `PROFILE_INVALID`, `TARGET_RESOLVED`,
+      `TARGET_UNRESOLVED`, `TARGET_AMBIGUOUS`, `TARGET_CAPABILITY_BLOCKED`
+- [x] Atomic JSON repository in the platform data directory; ids as filenames,
+      so profile names can never reach the filesystem
+- [x] Corrupt, empty and unreadable files surfaced in listings, not fatal
+- [x] UI: profile picker, New/Save/Save As/Duplicate/Delete/Import/Export,
+      target status with a Resolve action, unsaved-changes indicator and
+      Save/Discard/Cancel prompt (including on close)
+- [x] `--profiles` and `--validate-profile`, neither of which sends input
+- [x] Loading, importing, resolving and validating proven inert
+- [x] 217 profile tests (serialization, repository, resolver, service, UI)
+
+Deliberately not done here: YAML profiles, a profile database, cloud sync.
 
 ## Phase 5 — Packaging and distribution
 

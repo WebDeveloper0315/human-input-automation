@@ -110,6 +110,16 @@ class TargetPanel(QGroupBox):
         else:
             self._set_selected(None)
 
+    def clear_selection(self) -> None:
+        """Drop the current selection.
+
+        Used when a profile's target could not be resolved: leaving a stale
+        selection behind would let Start run the plan against a window the
+        profile never referred to.
+        """
+        self.table.clearSelection()
+        self._set_selected(None)
+
     def select_handle(self, handle: str) -> None:
         """Select the row with ``handle``; handles identify windows, titles do not."""
         for row, target in enumerate(self._targets):
