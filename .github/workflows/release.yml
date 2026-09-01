@@ -1,0 +1,209 @@
+name: Release
+
+# Artifacts are built on tags (and on demand), never on every commit.
+#   git tag v0.6.0 && git push origin v0.6.0
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Attach the artifacts to a GitHub release"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.12"
+  PYINSTALLER_VERSION: ">=6.10,<7"
+
+jobs:
+  # Nothing is built until the suite passes on all three platforms: a release
+  # that skipped the tests is worse than no release.
+  test:
+    name: tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -e ".[dev]"
+      - run: pytest
+
+  quality:
+    name: ruff + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - run: pip install -e ".[dev,gui]"
+      - run: ruff check .
+      - run: mypy src
+      - run: mypy src tests
+
+  # Native runners only: nothing here is cross-compiled.
+  build:
+    name: build (${{ matrix.label }})
+    needs: [test, quality]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported glibc, so the AppImage also runs on newer distros.
+          - os: ubuntu-22.04
+            label: linux-x86_64
+            artifacts: "dist/*.AppImage"
+          - os: macos-14
+            label: macos-arm64
+            artifacts: "dist/*.dmg"
+          - os: windows-latest
+            label: windows-x64
+            artifacts: "dist/*.zip\ndist/*setup.exe"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Qt runtime libraries (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libfontconfig1 \
+            libglib2.0-0 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 \
+            libxcb-shape0 libxcb-xkb1 libxkbcommon0 desktop-file-utils fuse
+
+      - name: appimagetool (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -sSL -o /usr/local/bin/appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+
+      - run: pip install -e ".[dev,desktop]" "pyinstaller${{ env.PYINSTALLER_VERSION }}"
+
+      # build.py runs the artifact smoke test itself: it opens the real window
+      # and round-trips a profile. It never sends keyboard or mouse input.
+      - name: Build and verify
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python packaging/build.py --skip-icons
+
+      - name: Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        run: choco install innosetup --no-progress -y
+
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          # The tag is v0.6.0; the installer wants 0.6.0.
+          version=$(python -c "import sys; sys.path.insert(0, 'src'); from human_input_automation import __version__; print(__version__)")
+          iscc "packaging/windows/installer.iss" "/DAppVersion=$version"
+
+      # Signing runs only when the credentials exist. With no secrets the build
+      # is produced unsigned and labelled as such in the release notes.
+      - name: Sign and notarise (macOS, only with credentials)
+        if: runner.os == 'macOS'
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_NOTARY_PROFILE: ${{ secrets.MACOS_NOTARY_PROFILE }}
+          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
+          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
+          MACOS_NOTARY_TEAM_ID: ${{ secrets.MACOS_NOTARY_TEAM_ID }}
+        run: |
+          packaging/macos/sign_and_notarize.sh \
+            dist/HumanInputAutomation.app \
+            "$(ls dist/*.dmg | head -1)"
+
+      - name: Report artifact sizes
+        shell: bash
+        run: ls -lh dist/ | tee dist/artifact-listing.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: |
+            dist/*.AppImage
+            dist/*.dmg
+            dist/*.zip
+            dist/*setup.exe
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  # Re-verify what will actually be published, not what the build job had.
+  verify:
+    name: verify artifacts
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Every platform produced an artifact
+        run: |
+          set -e
+          ls -R artifacts
+          test -n "$(find artifacts -name '*.AppImage')" || { echo "missing Linux artifact"; exit 1; }
+          test -n "$(find artifacts -name '*.dmg')" || { echo "missing macOS artifact"; exit 1; }
+          test -n "$(find artifacts -name '*.zip')" || { echo "missing Windows artifact"; exit 1; }
+      - name: Checksums cover every artifact
+        run: |
+          set -e
+          find artifacts -name 'SHA256SUMS' -exec cat {} \;
+          count=$(find artifacts -name 'SHA256SUMS' | wc -l)
+          test "$count" -ge 3 || { echo "expected one SHA256SUMS per platform"; exit 1; }
+      - name: Combined checksum file
+        run: |
+          mkdir -p release
+          find artifacts -type f ! -name 'SHA256SUMS' ! -name 'artifact-listing.txt' \
+            -exec cp {} release/ \;
+          cd release && sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-bundle
+          path: release/
+
+  release:
+    name: publish
+    needs: verify
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-bundle
+          path: release
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          draft: true
+          generate_release_notes: true
+          body: |
+            See CHANGELOG.md for the full notes.
+
+            **Verification status.** These artifacts are built and smoke-tested
+            automatically (the application launches, opens its window and stores
+            a profile). Real keyboard, mouse and window automation must still be
+            verified by hand - see `docs/RELEASE-CHECKLIST.md`.
+
+            **Signing.** Windows artifacts are unsigned. macOS artifacts are
+            signed and notarised only when the release credentials are
+            configured; otherwise they are unsigned and macOS will warn on first
+            launch. Check the job log for which applies to this build.
+
+            Verify downloads against `SHA256SUMS`.

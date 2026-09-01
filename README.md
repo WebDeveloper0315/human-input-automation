@@ -3,11 +3,10 @@
 Cross-platform desktop automation for keyboard and mouse input, inspired by
 AutoIt. Windows, macOS and Ubuntu/Linux.
 
-**Status:** Phase 4 — the automation core, a desktop UI, hardened platform
-adapters with an honest capability model, and saved profiles with target
-re-resolution. **Real end-to-end input has still not been verified on Windows,
-macOS or a native X11 session**; see "Platform support" below and
-`docs/PHASE3-PLATFORM-REPORT.md`.
+**Status:** Phase 5 — installable builds for Windows, macOS and Linux, on top of
+the automation core, desktop UI, capability model and saved profiles. **Real
+end-to-end input has still not been verified on any platform**; see
+"Implemented, packaged, verified" below.
 
 ## What it does
 
@@ -39,6 +38,21 @@ accessibility and productivity work.
 
 ## Install
 
+### From a release (no Python needed)
+
+| Platform | Download | Install |
+| --- | --- | --- |
+| Windows | `HumanInputAutomation-<version>-windows-x64-setup.exe` | Run it. Installs per-user; **no administrator rights**. |
+| macOS | `HumanInputAutomation-<version>-macos-arm64.dmg` | Open and drag to Applications. Unsigned builds need right-click → Open. |
+| Linux | `HumanInputAutomation-<version>-linux-x86_64.AppImage` | `chmod +x` and run. |
+
+Check your download first: `sha256sum -c SHA256SUMS`.
+
+Profiles and logs are stored in your user directory, never inside the
+installation, and uninstalling does not delete them.
+
+### From source
+
 ```bash
 python -m venv .venv
 # activate the environment
@@ -46,6 +60,15 @@ pip install -e ".[dev]"               # core + pytest/ruff/mypy (no desktop need
 pip install -e ".[dev,gui]"           # adds PySide6, enough to run the UI and its tests
 pip install -e ".[dev,desktop]"       # adds PySide6 + pynput + pywinctl (real input)
 ```
+
+### Building the packages
+
+```bash
+pip install -e ".[dev,desktop]" pyinstaller
+python packaging/build.py             # build, verify and checksum for this platform
+```
+
+See `packaging/README.md` for the build environment and signing.
 
 The core has **no runtime dependencies**. Everything that touches a real desktop
 lives behind the `gui`, `input` and `windows` extras (`desktop` installs all
@@ -202,16 +225,34 @@ is never shown as "no".
 | Global stop hotkey | available | **Input Monitoring** permission | available | unavailable |
 | Multi-monitor | available | restricted (logical points) | restricted (scale unreported) | restricted |
 
-### How verified is this?
+### Implemented, packaged, verified
 
-Honest answer, per platform:
+These are different claims, and the project keeps them apart:
 
-| | What has actually been executed |
-| --- | --- |
-| **Ubuntu Wayland** | Read-only checks on Ubuntu 26.04 GNOME/Wayland+XWayland: window enumeration, PIDs, focus reading, monitor layout, key translation. **No input was injected.** |
-| **Ubuntu X11** | Not tested — no native X11 session was available. |
-| **macOS** | Not tested. Permission model implemented from Apple's documented behaviour; the `Key.INSERT` gap was verified from pynput's source. |
-| **Windows** | Not tested. |
+* **Implemented** — the code path exists and is unit tested.
+* **Packaged** — a distributable artifact is produced.
+* **Smoke-tested** — the artifact launches, opens its window and stores a
+  profile. No input was sent.
+* **Platform-verified** — real keyboard, mouse and window behaviour was
+  executed on that platform by a person.
+
+| Platform | Implemented | Packaged | Artifact built | Smoke-tested | Real input verified |
+| --- | --- | --- | --- | --- | --- |
+| Linux (Wayland + XWayland) | yes | yes | **yes** | **yes** | **no** |
+| Linux X11 | yes | yes | yes (same artifact) | no | **no** |
+| Windows | yes | yes | **no** | no | **no** |
+| macOS | yes | yes | **no** | no | **no** |
+
+Only the Linux AppImage has actually been built and run — on Ubuntu 26.04
+GNOME/Wayland, where it launches, loads the real Qt platform plugin from inside
+the bundle, and round-trips a profile. The Windows and macOS build
+configurations exist and are reviewed but have never been executed, because no
+such machine was available.
+
+No synthetic keyboard or mouse input has been executed on **any** platform.
+`docs/PHASE3-PLATFORM-REPORT.md` records exactly what was run;
+`docs/RELEASE-CHECKLIST.md` is the procedure for verifying a platform you do
+have.
 
 `docs/PHASE3-PLATFORM-REPORT.md` records exactly what was run, what was found
 (including two real library defects), and a manual checklist for verifying a
@@ -248,7 +289,7 @@ Behaviour on scaled displays (Windows 150%, macOS Retina) is unverified.
 ## Development
 
 ```bash
-pytest                                     # 615 tests with the gui extra, 519 without
+pytest                                     # 672 tests with the gui extra, 565 without
 pytest -m manual                           # host-dependent checks, opt-in
 ruff check .
 mypy src
@@ -256,6 +297,8 @@ mypy src tests
 python -m human_input_automation --check
 python -m human_input_automation --diagnose
 python -m human_input_automation --profiles
+python -m human_input_automation --smoke-test   # starts the UI, stores a profile, no input
+python packaging/build.py                       # build and verify this platform's artifact
 ```
 
 Qt tests use the `offscreen` platform plugin (set automatically in
@@ -267,6 +310,8 @@ Tests that need a real desktop are marked (`manual`, `windows`, `macos`,
 `linux`, `x11`, `wayland`) and excluded from the default run.
 
 See `docs/ARCHITECTURE.md` for the layering, the Qt threading rule and the
-design decisions, `docs/PROFILE-FORMAT.md` for the profile schema,
+design decisions, `packaging/README.md` for how the packages are built,
+`docs/RELEASE-CHECKLIST.md` for the manual verification procedure,
+`CHANGELOG.md` for release notes, `docs/PROFILE-FORMAT.md` for the profile schema,
 `docs/PHASE3-PLATFORM-REPORT.md` for what has actually been verified on real
 hardware, and `docs/ROADMAP.md` for what comes next.

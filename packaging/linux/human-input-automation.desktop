@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Human Input Automation
+GenericName=Keyboard and mouse automation
+Comment=Cross-platform keyboard and mouse automation desktop application
+Exec=HumanInputAutomation
+Icon=human-input-automation
+Categories=Utility;Accessibility;
+Terminal=false
+StartupNotify=true
+StartupWMClass=HumanInputAutomation

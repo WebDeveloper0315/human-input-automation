@@ -52,6 +52,11 @@ same name and confuses packaging and analysis tools.
 | `adapters/x11_windows.py` | X11/EWMH window discovery and activation (Linux) |
 | `adapters/screens.py` | Monitor layout via pymonctl |
 | `diagnostics.py` | `--diagnose`: read-only capability report |
+| `metadata.py` | Application name, version and identifiers - one source of truth |
+| `paths.py` | Per-user data/log directories, bundled-resource lookup |
+| `logging_setup.py` | Rotating file logging with typed-text redaction |
+| `startup.py` | Actionable start-up failures (no GUI, no display, bad Qt plugin) |
+| `ui/onboarding.py` | First-run briefing and per-permission guidance |
 | `adapters/pynput_input.py` | Real keyboard and mouse (lazy import) |
 | `adapters/pywinctl_windows.py` | Real window discovery/activation (lazy import) |
 | `adapters/registry.py` | Chooses adapters, degrades to null adapters |
@@ -269,6 +274,63 @@ Domain validation is not duplicated: the profile layer sequences its own
 structural checks and then hands the plan to the existing `validate_plan`.
 See `docs/PROFILE-FORMAT.md` for the schema, matching priority and security
 model.
+
+## Packaging
+
+One packaging system: **PyInstaller**. It is mature, handles PySide6 through
+maintained hooks, builds on all three platforms from a single spec, and needs no
+build-system-specific project layout. Nuitka would add a compiler toolchain to
+every build machine for a startup-time gain this application does not need;
+Briefcase would impose its own project structure on a working one. Adding a
+second framework would double the surface without covering anything the first
+does not.
+
+```
+packaging/
+├── human-input-automation.spec   one spec, branching per platform
+├── build.py                      build → verify → checksum
+├── common/{launcher,make_icons}.py
+├── windows/installer.iss         per-user, no administrator rights
+├── macos/{entitlements.plist,sign_and_notarize.sh}
+└── linux/{AppRun,*.desktop}
+```
+
+Three rules keep packaging out of the application:
+
+* **No PyInstaller import ever appears in application code.** The adapters
+  import pynput, pywinctl and Xlib lazily and per platform, which is what keeps
+  the core headless-importable. PyInstaller cannot see the backend modules those
+  libraries choose at runtime, so they are declared as `hiddenimports` in the
+  spec - not force-imported in `adapters/`.
+* **Resources are found through `paths.resource_path`**, which resolves against
+  the package directory in a checkout and `<_MEIPASS>/human_input_automation`
+  in a bundle. Nothing else needs to know whether it is frozen.
+* **User data never lives in the installation directory.** `paths.py` puts
+  profiles and logs in the platform's per-user location, because an installed
+  application may sit somewhere read-only.
+
+The bundle excludes Qt Quick/QML, the GTK platform theme and all development
+tooling; the Linux bundle is 185 MB uncompressed and 66 MB as an AppImage.
+
+### Start-up and first run
+
+```
+initialise()            create data/profile/log directories, start logging
+   ↓
+build_service()         adapters + engine + profile storage
+   ↓
+MainWindow              first run only: capability and permission briefing
+```
+
+Failures at each step produce a specific message (`startup.py`): missing GUI
+libraries, no display, an unloadable Qt platform plugin, an unwritable data
+directory. None of them shows a traceback to a normal user, and `--verbose`
+keeps the detail for developers.
+
+Logging writes to the platform log directory with rotation. A
+`RedactingFilter` is installed on every handler so the text a user automates -
+which may be a password - never becomes a log transcript; the diagnostic shape
+of the message survives, the content does not.
 
 ## Threading and the Qt boundary
 

@@ -197,8 +197,18 @@ Neither is zero. Both are documented rather than glossed over.
 
 ## 7. Manual verification procedure (not yet executed)
 
-For each platform, on a machine you are willing to have typed into. Use a
-scratch text editor as the target — never a terminal or anything destructive.
+Since Phase 5 there are installable artifacts, so this no longer needs a source
+checkout. `docs/RELEASE-CHECKLIST.md` holds the full per-platform checklist and
+the safe verification profile; obtain the artifact for the machine under test:
+
+| Platform | Artifact | Install |
+| --- | --- | --- |
+| Windows | `HumanInputAutomation-<version>-windows-x64-setup.exe` | Run it; per-user, no administrator rights |
+| macOS | `…-macos-arm64.dmg` | Open, drag to Applications |
+| Linux | `…-linux-x86_64.AppImage` | `chmod +x` and run |
+
+Verify the download against `SHA256SUMS` first. From a source checkout the same
+tests apply:
 
 ```bash
 pip install -e ".[dev,desktop]"
@@ -273,10 +283,42 @@ layout-independent.
   Until step 8 of §7 has been run, treat coordinates on scaled displays as
   unverified.
 
-## 10. Summary
+## 10. Packaging status (Phase 5)
+
+Packaging changes what is *possible* to verify, not what *has been* verified.
+
+| Platform | Implemented | Packaged | Artifact built | Smoke-tested | Real input verified |
+| --- | --- | --- | --- | --- | --- |
+| Linux (this machine, Wayland+XWayland) | yes | yes | **yes** — AppImage, 66.5 MB | **yes** | **no** |
+| Linux X11 | yes | yes | yes (same artifact) | not on an X11 session | no |
+| Windows | yes | yes | **no** — no Windows machine | no | no |
+| macOS | yes | yes | **no** — no macOS machine | no | no |
+
+What "smoke-tested" covered for the Linux AppImage, executed on this machine:
+
+```
+$ ./HumanInputAutomation-0.6.0-linux-x86_64.AppImage --smoke-test
+  Qt platform: wayland          # the real platform plugin, from inside the bundle
+  window: 'Human Input Automation - Untitled profile'
+  icon: found (/tmp/.mount_.../usr/bin/_internal/human_input_automation/resources/icons/app.png)
+  host: linux/wayland
+  profile round-trip: 'Packaging smoke test'
+  no input was generated
+```
+
+Also executed against the AppImage: `--version`, `--check`, `--diagnose`,
+`--profiles`, and a `sha256sum -c` of the published checksum. Profiles were
+written to the per-user data directory, outside the bundle.
+
+The Windows and macOS build configurations have been written and reviewed but
+**never executed**: no such machine was available. Their CI jobs exist and are
+expected to work; that expectation is not evidence.
+
+## 11. Summary
 
 * One platform configuration was exercised: Ubuntu 26.04 GNOME **Wayland** with
-  XWayland — read-only.
+  XWayland — read-only, plus a packaged AppImage that launches and stores
+  profiles there.
 * Two real library defects were found and worked around (pywinctl crash,
   pynput's silent X11 fallback), plus one real platform key gap
   (`Key.INSERT` on macOS).

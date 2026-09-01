@@ -77,6 +77,27 @@ ui -> application -> core <- adapters, with ports/ between core and adapters
 * Do not duplicate `validate_plan`; sequence structural checks then call it.
 * Never report a profile as saved when the write failed.
 
+## Packaging rules
+
+* One packaging system (PyInstaller). Do not add a second without a concrete
+  reason the first cannot cover.
+* Never import PyInstaller from application code, and never force-import a
+  platform library to make freezing easier. Hidden imports belong in the spec.
+* Find bundled files through `paths.resource_path`, never by walking up from
+  `__file__`.
+* Keep user data out of the installation directory, and never delete profiles
+  during uninstall.
+* Metadata (name, version, identifiers) comes from `metadata.py`; a test keeps
+  it in step with `pyproject.toml`.
+* Verify artifacts by running them (`--smoke-test`), not by checking that a
+  file exists. Automated verification never sends input.
+* Signing and notarisation run only when credentials are present, and an
+  unsigned build must be labelled unsigned - never implied to be signed.
+* Do not upgrade a platform from "packaged" to "verified" without executing the
+  manual checklist on that platform, and record results in
+  `docs/PHASE3-PLATFORM-REPORT.md`.
+* Never log automated text or profile contents.
+
 ## Invariants
 
 * Never send input before the target is activated and focus is checked.
@@ -123,6 +144,7 @@ mypy src tests
 python -m human_input_automation --check      # must work headless
 python -m human_input_automation --diagnose  # must work headless, sends no input
 python -m human_input_automation --profiles  # must work headless, sends no input
+python -m human_input_automation --smoke-test # starts the UI, stores a profile, no input
 ```
 
 All must pass. Do not skip or silence failing tests, and do not weaken strict

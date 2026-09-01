@@ -118,11 +118,32 @@ Still open — these need physical machines:
 
 Deliberately not done here: YAML profiles, a profile database, cloud sync.
 
-## Phase 5 — Packaging and distribution
+## Phase 5 — Packaging and distribution (done, unevenly verified)
 
-- [ ] PyInstaller builds for Windows, macOS and Linux
-- [ ] macOS signing/notarisation notes and permission onboarding
-- [ ] Versioned release artifacts and installation documentation
+- [x] PyInstaller specification covering all three platforms
+- [x] `packaging/build.py`: build, verify with a real smoke test, checksum
+- [x] Linux AppImage - **built and verified on this machine**
+- [x] macOS `.app` + `.dmg` configuration - **not built; no macOS machine**
+- [x] Windows directory, `.zip` and per-user Inno Setup installer - **not
+      built; no Windows machine**
+- [x] Reproducibly generated icons (PNG/ICO/ICNS), no network needed
+- [x] Per-user data and log directories; user data never inside the install
+- [x] First-run initialisation and permission onboarding, with macOS
+      Accessibility and Input Monitoring shown separately
+- [x] Rotating file logging with typed-text redaction
+- [x] Actionable start-up failure messages
+- [x] `--smoke-test` and `--version`
+- [x] Release workflow: test → quality → build (native runners) → verify →
+      draft release, with `SHA256SUMS`
+- [x] macOS signing/notarisation that runs only when credentials exist
+- [x] `CHANGELOG.md`, `docs/RELEASE-CHECKLIST.md`
+
+Still open:
+
+- [ ] Execute the Windows and macOS build jobs on real runners
+- [ ] Windows code signing (needs a purchased certificate)
+- [ ] macOS signing and notarisation (needs a Developer ID)
+- [ ] Clean-machine installation test on each platform
 
 ## Phase 6 — Advanced
 

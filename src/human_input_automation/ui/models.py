@@ -32,6 +32,7 @@ from ..core.actions import (
     TypeText,
     Wait,
 )
+from ..core.capabilities import CapabilityState
 from ..core.errors import ValidationError
 from ..core.events import (
     ActionCompleted,
@@ -341,6 +342,137 @@ def host_status_text(
 
 def _yes_no(value: bool) -> str:
     return "yes" if value else "no"
+
+
+# ---------------------------------------------------------------------------
+# Permission onboarding
+# ---------------------------------------------------------------------------
+
+#: How bad each state is, worst first, when summarising one permission.
+_STATE_SEVERITY = {
+    CapabilityState.DENIED: 3,
+    CapabilityState.UNAVAILABLE: 2,
+    CapabilityState.UNKNOWN: 1,
+    CapabilityState.RESTRICTED: 1,
+    CapabilityState.AVAILABLE: 0,
+}
+
+_PERMISSION_STATE_WORDS = {
+    CapabilityState.AVAILABLE: "granted",
+    CapabilityState.DENIED: "not granted",
+    CapabilityState.UNKNOWN: "could not be checked",
+    CapabilityState.RESTRICTED: "limited",
+    CapabilityState.UNAVAILABLE: "unavailable",
+}
+
+
+@dataclass(frozen=True)
+class PermissionGuidance:
+    """One OS permission, what it unlocks, and how to grant it.
+
+    Deliberately per permission rather than one "grant permissions" message:
+    macOS Accessibility and Input Monitoring are separate grants that unlock
+    different features, and telling the user to "grant permissions" leaves them
+    guessing which pane to open.
+    """
+
+    permission: str
+    state: CapabilityState
+    blocks: tuple[str, ...] = field(default_factory=tuple)
+    where: str = ""
+    requires_restart: bool = False
+
+    @property
+    def is_satisfied(self) -> bool:
+        return self.state is CapabilityState.AVAILABLE
+
+    @property
+    def state_word(self) -> str:
+        return _PERMISSION_STATE_WORDS.get(self.state, self.state.value)
+
+    def why(self) -> str:
+        if not self.blocks:
+            return "Required by this platform for automation."
+        return "Needed for: " + ", ".join(self.blocks) + "."
+
+    def instructions(self) -> str:
+        steps = []
+        if self.where:
+            steps.append(f"Grant it in {self.where}.")
+        if self.requires_restart:
+            steps.append("Then quit and reopen this application.")
+        if self.state is CapabilityState.UNKNOWN:
+            steps.append(
+                "This build cannot check the permission automatically, so it may "
+                "already be granted."
+            )
+        return " ".join(steps)
+
+
+def permission_guidance(host: PlatformReport) -> tuple[PermissionGuidance, ...]:
+    """One entry per OS permission this platform gates automation behind."""
+    grouped: dict[str, list[Any]] = {}
+    for capability in host.matrix:
+        if capability.permission:
+            grouped.setdefault(capability.permission, []).append(capability)
+
+    guidance: list[PermissionGuidance] = []
+    for permission, capabilities in grouped.items():
+        worst = max(capabilities, key=lambda item: _STATE_SEVERITY.get(item.state, 0))
+        blocks = tuple(
+            capability.name.value.replace("_", " ")
+            for capability in capabilities
+            if not capability.is_permitted or capability.state is CapabilityState.UNKNOWN
+        )
+        guidance.append(
+            PermissionGuidance(
+                permission=permission,
+                state=worst.state,
+                blocks=blocks,
+                where=worst.permission_category or "",
+                requires_restart=any(item.requires_restart for item in capabilities),
+            )
+        )
+    return tuple(sorted(guidance, key=lambda item: item.permission))
+
+
+def outstanding_permissions(host: PlatformReport) -> tuple[PermissionGuidance, ...]:
+    """Permissions that are not currently granted."""
+    return tuple(item for item in permission_guidance(host) if not item.is_satisfied)
+
+
+@dataclass(frozen=True)
+class FirstRunSummary:
+    """What to tell the user the first time the application starts."""
+
+    platform_line: str
+    capability_line: str
+    permissions: tuple[PermissionGuidance, ...] = field(default_factory=tuple)
+    profile_directory: str = ""
+    log_directory: str = ""
+    notes: tuple[str, ...] = field(default_factory=tuple)
+
+    @property
+    def needs_permissions(self) -> bool:
+        return bool(self.permissions)
+
+
+def first_run_summary(
+    host: PlatformReport,
+    profile_directory: str = "",
+    log_directory: str = "",
+    problems: Sequence[str] = (),
+) -> FirstRunSummary:
+    """Assemble the first-run briefing from the live capability report."""
+    banner = capability_banner(host, problems)
+    return FirstRunSummary(
+        platform_line=f"Platform: {_platform_label(host)}",
+        capability_line=banner.as_text(),
+        permissions=outstanding_permissions(host),
+        profile_directory=profile_directory,
+        log_directory=log_directory,
+        notes=tuple(host.warnings),
+    )
 
 
 # ---------------------------------------------------------------------------

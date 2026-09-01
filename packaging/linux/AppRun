@@ -1,0 +1,8 @@
+#!/bin/sh
+# AppImage entry point.
+#
+# Deliberately does not set QT_QPA_PLATFORM: the application detects X11,
+# Wayland and XWayland itself and reports the differences honestly. Forcing a
+# platform here would hide exactly what the capability model exists to show.
+HERE="$(dirname "$(readlink -f "$0")")"
+exec "${HERE}/usr/bin/HumanInputAutomation" "$@"

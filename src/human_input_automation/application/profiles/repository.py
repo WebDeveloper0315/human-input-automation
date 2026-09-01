@@ -21,12 +21,12 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import sys
 import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ...paths import user_data_directory
 from .schema import (
     Profile,
     ProfileFormatError,
@@ -37,32 +37,11 @@ from .schema import (
 )
 from .serialization import profile_from_dict, profile_to_dict
 
-APP_DIRECTORY_NAME = "human-input-automation"
 PROFILE_SUFFIX = ".json"
 
-
-def default_data_directory(
-    platform_id: str | None = None, env: dict[str, str] | None = None, home: Path | None = None
-) -> Path:
-    """The platform's per-user application data directory.
-
-    Windows: ``%APPDATA%``. macOS: ``~/Library/Application Support``.
-    Linux and others: ``$XDG_DATA_HOME`` or ``~/.local/share``. Every input is
-    injectable so tests never depend on - or write to - the real one.
-    """
-    platform = (platform_id if platform_id is not None else sys.platform).lower()
-    environ = env if env is not None else dict(os.environ)
-    base_home = home if home is not None else Path.home()
-
-    if platform.startswith("win"):
-        appdata = environ.get("APPDATA")
-        base = Path(appdata) if appdata else base_home / "AppData" / "Roaming"
-    elif platform == "darwin":
-        base = base_home / "Library" / "Application Support"
-    else:
-        xdg = environ.get("XDG_DATA_HOME")
-        base = Path(xdg) if xdg else base_home / ".local" / "share"
-    return base / APP_DIRECTORY_NAME
+#: The platform data directory lives in :mod:`...paths`, so the application and
+#: its packaging agree on one location.
+default_data_directory = user_data_directory
 
 
 def default_profile_directory(

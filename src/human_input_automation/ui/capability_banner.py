@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 from .models import BannerModel, CapabilityLevel
 
@@ -20,6 +20,8 @@ _TINTS: dict[CapabilityLevel, str] = {
 
 class CapabilityBanner(QFrame):
     """Shows what the host supports, and why something is unavailable."""
+
+    details_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -41,7 +43,18 @@ class CapabilityBanner(QFrame):
         self.details_label.setWordWrap(True)
         self.details_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
 
-        layout.addWidget(self.headline_label)
+        self.details_button = QPushButton("Platform && permissions...")
+        self.details_button.setAccessibleName("Show platform and permission details")
+        self.details_button.setToolTip(
+            "What this computer allows, and which permissions are still needed"
+        )
+        self.details_button.clicked.connect(self.details_requested.emit)
+
+        header = QHBoxLayout()
+        header.addWidget(self.headline_label, 1)
+        header.addWidget(self.details_button)
+
+        layout.addLayout(header)
         layout.addWidget(self.details_label)
         self._model: BannerModel | None = None
 

@@ -40,15 +40,18 @@ from ..core.events import (
 from ..core.plan import AutomationPlan, ExecutionLimits, RunOptions
 from ..core.target import TargetWindow, WindowCapabilities
 from ..core.timing import TimingProfile
+from ..paths import ApplicationPaths
 from .action_editor import ActionEditor
 from .capability_banner import CapabilityBanner
 from .dry_run_panel import DryRunPanel
 from .models import (
+    FirstRunSummary,
     UiState,
     UnsavedChoice,
     capability_banner,
     controls_for,
     dry_run_view,
+    first_run_summary,
     format_event,
     friendly_error,
     next_state,
@@ -57,6 +60,7 @@ from .models import (
     target_status_view,
     timing_to_values,
 )
+from .onboarding import OnboardingDialog
 from .profile_panel import ProfilePanel
 from .run_bridge import RunEventBridge
 from .run_controls import RunControls
@@ -68,12 +72,21 @@ from .timing_panel import TimingPanel
 class MainWindow(QMainWindow):
     """The desktop application window."""
 
-    def __init__(self, service: AutomationService, *, show_dialogs: bool = True) -> None:
+    def __init__(
+        self,
+        service: AutomationService,
+        *,
+        show_dialogs: bool = True,
+        paths: ApplicationPaths | None = None,
+    ) -> None:
         super().__init__()
         self._service = service
         self._show_dialogs = show_dialogs
+        self._paths = paths
         self._state = UiState.IDLE
         self.last_message: tuple[str, str] | None = None
+        #: The last briefing built, so tests and the log can inspect it.
+        self.last_onboarding: FirstRunSummary | None = None
 
         #: Current profile, whether it has unsaved edits, and what is known
         #: about its target. ``None`` means "an unsaved profile".
@@ -110,6 +123,7 @@ class MainWindow(QMainWindow):
         self.refresh_profiles()
         self._enable_hotkey()
         self._sync_controls()
+        self._maybe_show_onboarding()
 
     # -- construction ------------------------------------------------------
     def _build_layout(self) -> None:
@@ -159,12 +173,46 @@ class MainWindow(QMainWindow):
         self.profile_panel.import_requested.connect(self.import_profile)
         self.profile_panel.export_requested.connect(self.export_profile)
         self.profile_panel.resolve_requested.connect(self.resolve_profile_target)
+        self.banner.details_requested.connect(self.show_onboarding)
         self.controls.start_requested.connect(self.start_run)
         self.controls.pause_requested.connect(self.pause_run)
         self.controls.resume_requested.connect(self.resume_run)
         self.controls.stop_requested.connect(self.stop_run)
         self.controls.emergency_requested.connect(self.emergency_stop)
         self.controls.dry_run_requested.connect(self.dry_run)
+
+    # -- first run and permissions -----------------------------------------
+    def build_first_run_summary(self) -> FirstRunSummary:
+        """The briefing shown on first launch and from the banner button."""
+        return first_run_summary(
+            self._service.host,
+            profile_directory=str(self._service.profiles.directory),
+            log_directory=str(self._paths.logs) if self._paths else "",
+            problems=self._service.problems,
+        )
+
+    @Slot()
+    def show_onboarding(self) -> None:
+        """Explain the platform and any permissions still needed.
+
+        Never changes a system setting and never asks the OS for one; it only
+        says what is missing and where the user can grant it.
+        """
+        summary = self.build_first_run_summary()
+        self.last_onboarding = summary
+        for guidance in summary.permissions:
+            self._log(f"Permission required: {guidance.permission} - {guidance.instructions()}")
+        if self._show_dialogs:
+            OnboardingDialog(summary, self).exec()
+
+    def _maybe_show_onboarding(self) -> None:
+        """First launch only: brief the user, then record that we did."""
+        paths = self._paths
+        if paths is None or not paths.is_first_run:
+            return
+        self._log("First run: application directories initialised")
+        self.show_onboarding()
+        paths.mark_initialised()
 
     # -- capability / targets ----------------------------------------------
     def _update_banner(self) -> None:

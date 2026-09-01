@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "human-input-automation"
-version = "0.5.0"
+version = "0.6.0"
 description = "Cross-platform keyboard and mouse automation desktop application"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -44,7 +44,7 @@ namespaces = false
 # PEP 561 marker: the package ships type information, so downstream code (and
 # the test suite) type-checks against the installed package.
 [tool.setuptools.package-data]
-human_input_automation = ["py.typed"]
+human_input_automation = ["py.typed", "resources/icons/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
