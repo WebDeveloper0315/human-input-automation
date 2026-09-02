@@ -12,7 +12,8 @@ from human_input_automation.core.target import (
     TargetWindow,
     WindowCapabilities,
 )
-from human_input_automation.core.validation import validate_plan
+from human_input_automation.core.timing import TimingProfile
+from human_input_automation.core.validation import shortest_run_seconds, validate_plan
 
 from .fakes import make_target
 
@@ -56,6 +57,77 @@ def test_text_length_limits_are_enforced_per_action_and_in_total() -> None:
         limits=ExecutionLimits(max_text_length=100, max_total_characters=50),
     )
     assert "plan.too_much_text" in codes(total)
+
+
+def test_a_source_file_sized_action_fits_the_default_limits() -> None:
+    """20 000 characters is the point of the per-action limit, not its edge case."""
+    limits = ExecutionLimits()
+    assert limits.max_text_length == 20_000
+
+    fits = AutomationPlan(make_target(), [TypeText(text="x" * limits.max_text_length)])
+    assert validate_plan(fits).ok
+
+    over = AutomationPlan(make_target(), [TypeText(text="x" * (limits.max_text_length + 1))])
+    assert "action.text_too_long" in codes(over)
+
+
+def test_the_default_limits_leave_room_for_several_full_actions() -> None:
+    """A plan total equal to one action's cap would refuse the second one."""
+    limits = ExecutionLimits()
+    assert limits.max_total_characters >= limits.max_text_length * 2
+
+    plan = AutomationPlan(
+        make_target(), [TypeText(text="x" * limits.max_text_length) for _ in range(2)]
+    )
+    assert "plan.too_much_text" not in codes(plan)
+
+
+def test_a_full_action_can_be_typed_inside_the_default_run_limit() -> None:
+    """Raising the text limit without the duration limit only moves the failure.
+
+    The duration limit is checked between actions, so it never cuts one short -
+    it drops everything after it. A plan that types a full action at the default
+    pace has to fit, or the limits contradict each other.
+    """
+    limits = ExecutionLimits()
+    assert limits.max_run_duration_s is not None
+    plan = AutomationPlan(make_target(), [TypeText(text="x" * limits.max_text_length)])
+    assert shortest_run_seconds(plan) < limits.max_run_duration_s
+    assert "plan.exceeds_run_limit" not in codes(plan)
+
+
+def test_a_plan_that_cannot_finish_in_time_says_so_before_it_starts() -> None:
+    plan = AutomationPlan(
+        make_target(),
+        [TypeText(text="x" * 5_000)],
+        timing=TimingProfile(char_delay_ms=200, char_jitter_ms=0, max_delay_ms=400),
+        limits=ExecutionLimits(max_run_duration_s=60),
+    )
+    result = validate_plan(plan)
+    assert "plan.exceeds_run_limit" in codes(plan)
+    # A warning, not an error: the run may still be worth starting.
+    assert result.ok
+    assert "1000 s" in "".join(issue.message for issue in result.warnings)
+
+
+def test_the_shortest_run_counts_waits_and_the_fastest_possible_keystroke() -> None:
+    timing = TimingProfile(
+        char_delay_ms=100, char_jitter_ms=40, min_delay_ms=20, max_delay_ms=200
+    )
+    plan = AutomationPlan(
+        make_target(),
+        [TypeText(text="x" * 10), Wait(duration_ms=5_000)],
+        timing=timing,
+    )
+    # 10 characters at 60 ms - the fastest the jitter allows - plus the wait.
+    assert shortest_run_seconds(plan) == (10 * 60 + 5_000) / 1000
+
+
+def test_the_shortest_run_of_an_instant_plan_is_nothing() -> None:
+    plan = AutomationPlan(
+        make_target(), [TypeText(text="x" * 100)], timing=TimingProfile.instant()
+    )
+    assert shortest_run_seconds(plan) == 0
 
 
 def test_wait_longer_than_the_run_limit_is_rejected() -> None:

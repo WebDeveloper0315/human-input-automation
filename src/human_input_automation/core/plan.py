@@ -17,12 +17,26 @@ class ExecutionLimits:
 
     They exist so a typo (a loop count of 100000, a pasted novel) cannot turn
     into an unstoppable flood of synthetic input.
+
+    The four are related, and raising one alone moves a failure rather than
+    removing it:
+
+    * ``max_text_length`` caps a single action. A whole source file is a
+      realistic thing to type into an editor, so it is generous.
+    * ``max_total_characters`` caps the plan. It has to leave room for several
+      full-size actions, or the second one is refused for reasons the first did
+      not hint at.
+    * ``max_run_duration_s`` is checked *between* actions, so it never cuts one
+      short - but a plan whose text cannot be typed inside it loses every action
+      after the deadline. At the default pace, 20 000 characters take about 27
+      minutes on their own, which is why an hour is the ceiling and why
+      :func:`~.validation.validate_plan` warns when a plan cannot fit.
     """
 
     max_actions: int = 500
-    max_text_length: int = 5_000
-    max_total_characters: int = 20_000
-    max_run_duration_s: float | None = 300.0
+    max_text_length: int = 20_000
+    max_total_characters: int = 100_000
+    max_run_duration_s: float | None = 3_600.0
 
     @classmethod
     def generous(cls) -> ExecutionLimits:

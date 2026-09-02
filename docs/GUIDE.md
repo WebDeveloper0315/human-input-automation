@@ -144,6 +144,18 @@ Two known limits: a blank line keeps whatever indentation the editor gave it,
 and a line that ends inside an unterminated string can leave one bracket behind.
 Both leave characters in the file rather than removing yours.
 
+### How much one run may do
+
+A plan is bounded so a mistake cannot become an unstoppable flood of input:
+**20 000 characters in one action**, 100 000 across the plan, 500 actions, and
+an hour of wall-clock time. Going over is reported when you press *Start* or
+*Dry run*, naming the limit and the actual size - nothing is silently truncated.
+
+The hour is not a separate opinion: 20 000 characters at the default pace take
+about 27 minutes to type. If a plan's text cannot be typed inside the time
+limit, the run log says so before anything is sent, because the limit is
+checked between actions and would otherwise drop the end of your plan.
+
 ### Typing with mistakes
 
 By default the application types perfectly. Tick *Mistype and correct, the way a

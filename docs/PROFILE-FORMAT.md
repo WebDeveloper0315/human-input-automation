@@ -80,8 +80,8 @@ interrupted save leaves the previous version intact — never a truncated file.
       "hesitation_rate": 0.0, "hesitation_ms": 450.0, "hesitation_jitter_ms": 250.0
     },
     "limits": {
-      "max_actions": 500, "max_text_length": 5000,
-      "max_total_characters": 20000, "max_run_duration_s": 300.0
+      "max_actions": 500, "max_text_length": 20000,
+      "max_total_characters": 100000, "max_run_duration_s": 3600.0
     },
     "options": {
       "dry_run": false, "seed": null,
@@ -163,6 +163,29 @@ detection system, and must not be described or used as one.
 
 A profile written before this section existed simply has no `"typing"` key and
 loads with the exact-typing default.
+
+## Limits
+
+`plan.limits` bounds what one run can do, so a mistake cannot become an
+unstoppable flood of input.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `max_actions` | 500 | Actions in one plan. |
+| `max_text_length` | 20000 | Characters in a single typing action - a whole source file. |
+| `max_total_characters` | 100000 | Characters across the plan. Kept well above `max_text_length` so a second full action is not refused for reasons the first never hinted at. |
+| `max_run_duration_s` | 3600 | Wall-clock ceiling, or `null` for none. |
+
+They interact, and raising one alone moves a failure rather than removing it.
+`max_run_duration_s` is checked *between* actions, so it never cuts one short -
+it drops whatever is still pending when the deadline passes. At the default
+pace 20 000 characters take about 27 minutes on their own, so a run limit that
+cannot fit the text would silently discard the end of the plan; `validate_plan`
+warns (`plan.exceeds_run_limit`) whenever the characters and waits alone cannot
+finish in time.
+
+The desktop UI always runs with the defaults above; a profile's stored limits
+are read back for inspection but the GUI does not yet expose them for editing.
 
 ## Target identity
 
