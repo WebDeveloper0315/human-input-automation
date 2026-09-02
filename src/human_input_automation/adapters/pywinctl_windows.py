@@ -16,9 +16,11 @@ The pywinctl module is injectable so the logic below is unit tested without it.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Sequence
 from typing import Any
 
+from ..core.capabilities import CapabilityName
 from ..core.errors import AdapterUnavailableError
 from ..core.target import (
     DisplayServer,
@@ -26,8 +28,15 @@ from ..core.target import (
     PlatformReport,
     TargetWindow,
 )
+from ..ports.clock import CancelToken
 
 logger = logging.getLogger(__name__)
+
+#: How long to wait for the window manager to actually move focus. macOS
+#: activation is asynchronous - AppleScript returns before the window server
+#: has moved keyboard focus - so success has to be confirmed, not assumed.
+ACTIVATION_TIMEOUT_SECONDS = 4.0
+ACTIVATION_POLL_SECONDS = 0.15
 
 
 def import_pywinctl() -> Any:
@@ -45,9 +54,15 @@ def import_pywinctl() -> Any:
 class PyWinCtlWindows:
     """Implements the window discovery and control ports."""
 
-    def __init__(self, host: PlatformReport, module: Any | None = None) -> None:
+    def __init__(
+        self,
+        host: PlatformReport,
+        module: Any | None = None,
+        activation_timeout: float = ACTIVATION_TIMEOUT_SECONDS,
+    ) -> None:
         self._pywinctl = module if module is not None else import_pywinctl()
         self._host = host
+        self._activation_timeout = activation_timeout
 
     # -- discovery ---------------------------------------------------------
     def list_windows(self) -> Sequence[TargetWindow]:
@@ -73,21 +88,63 @@ class PyWinCtlWindows:
         return None
 
     # -- control -----------------------------------------------------------
-    def activate(self, target: TargetWindow) -> bool:
-        """Focus ``target``; ``False`` when it cannot be done or verified."""
+    def activate(self, target: TargetWindow, cancel: CancelToken | None = None) -> bool:
+        """Focus ``target`` and confirm it really took focus.
+
+        ``wait=False`` is deliberate: pywinctl's own retry loop blocks for
+        around ten seconds on macOS and cannot be interrupted, so an emergency
+        stop during it would go unheard. The waiting is done here instead,
+        bounded and cancellable, and success is reported only once focus has
+        actually been observed to move.
+        """
         if not self._host.capabilities.can_activate:
             return False
         window = self._resolve(target)
         if window is None:
             return False
         try:
-            return bool(window.activate(wait=True))
+            window.activate(wait=False)
         except Exception as exc:
             logger.info("pywinctl activation failed: %s", exc)
             return False
+        return self._await_focus(target, cancel)
+
+    def _await_focus(self, target: TargetWindow, cancel: CancelToken | None) -> bool:
+        """Poll until the window is confirmed focused, or the deadline passes.
+
+        A platform that genuinely cannot answer returns ``None`` from
+        :meth:`is_active`; there is nothing to confirm, so the request is taken
+        at face value and the engine applies its own policy. A platform that
+        *can* answer must actually say yes.
+        """
+        deadline = time.monotonic() + self._activation_timeout
+        while True:
+            if cancel is not None and cancel.is_stop_requested():
+                return False
+            active = self.is_active(target)
+            if active is None:
+                return True
+            if active is True:
+                return True
+            if time.monotonic() >= deadline:
+                logger.info("window %s never took focus", target.handle)
+                return False
+            if cancel is not None:
+                if cancel.wait_for_stop(ACTIVATION_POLL_SECONDS):
+                    return False
+            else:
+                time.sleep(ACTIVATION_POLL_SECONDS)
 
     def is_active(self, target: TargetWindow) -> bool | None:
-        if not self._host.capabilities.can_verify_focus:
+        """Whether ``target`` holds focus, or ``None`` when unknowable.
+
+        Gated on whether the platform *forbids* the check, not on whether it is
+        certain: a permission that merely could not be preflighted is a reason
+        to try, not a reason to stop looking. Reporting ``None`` here used to
+        disable focus verification on macOS entirely, which let input reach a
+        window the user had not selected.
+        """
+        if not self._host.matrix.is_permitted(CapabilityName.FOCUS_VERIFICATION):
             return None
         window = self._resolve(target)
         if window is None:

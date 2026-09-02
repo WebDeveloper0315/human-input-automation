@@ -129,7 +129,7 @@ class FakeWindows:
     def find(self, handle: str) -> TargetWindow | None:
         return next((w for w in self.windows if w.handle == handle), None)
 
-    def activate(self, target: TargetWindow) -> bool:
+    def activate(self, target: TargetWindow, cancel: object = None) -> bool:
         self.calls.append(f"activate:{target.handle}")
         return self.activate_result
 

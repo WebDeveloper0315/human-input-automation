@@ -29,6 +29,7 @@ from typing import Any
 
 from ..core.errors import AdapterUnavailableError
 from ..core.target import PlatformReport, TargetWindow
+from ..ports.clock import CancelToken
 
 #: How long to wait for the window manager to act on an activation request.
 #: Activation is asynchronous - the request is a message to the window manager,
@@ -116,7 +117,7 @@ class X11Windows:
         return None
 
     # -- control -----------------------------------------------------------
-    def activate(self, target: TargetWindow) -> bool:
+    def activate(self, target: TargetWindow, cancel: CancelToken | None = None) -> bool:
         """Ask the window manager to focus ``target``.
 
         Returns ``False`` rather than raising - including when the window has
@@ -149,9 +150,9 @@ class X11Windows:
             self._display.sync()
         except Exception:
             return False
-        return self._await_focus(target)
+        return self._await_focus(target, cancel)
 
-    def _await_focus(self, target: TargetWindow) -> bool:
+    def _await_focus(self, target: TargetWindow, cancel: CancelToken | None = None) -> bool:
         """Wait briefly for the window manager to honour the request.
 
         Returns as soon as focus is confirmed. ``True`` is also returned when
@@ -161,12 +162,18 @@ class X11Windows:
         """
         deadline = time.monotonic() + self._activation_timeout
         while True:
+            if cancel is not None and cancel.is_stop_requested():
+                return False
             active = self.is_active(target)
             if active is None or active is True:
                 return True
             if time.monotonic() >= deadline:
                 return False
-            time.sleep(ACTIVATION_POLL_SECONDS)
+            if cancel is not None:
+                if cancel.wait_for_stop(ACTIVATION_POLL_SECONDS):
+                    return False
+            else:
+                time.sleep(ACTIVATION_POLL_SECONDS)
 
     def is_active(self, target: TargetWindow) -> bool | None:
         """Whether ``target`` holds focus, or ``None`` when unknowable."""

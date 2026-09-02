@@ -75,7 +75,7 @@ class NullWindowBackend:
     def find(self, handle: str) -> TargetWindow | None:
         return None
 
-    def activate(self, target: TargetWindow) -> bool:
+    def activate(self, target: TargetWindow, cancel: CancelToken | None = None) -> bool:
         return False
 
     def is_active(self, target: TargetWindow) -> bool | None:

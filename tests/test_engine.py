@@ -433,3 +433,40 @@ def test_delays_respect_profile_bounds_during_a_real_run(seed: int) -> None:
     )
     engine.run(plan)
     assert all(10 <= value <= 60 for value in clock.sleeps_ms)
+
+
+def test_no_input_when_activation_cannot_be_confirmed() -> None:
+    """Regression from a real macOS run: the first plan typed into the decoy.
+
+    The window adapter reported activation as successful while the window
+    server had not moved keyboard focus. An adapter that cannot confirm the
+    move must report failure, and the engine must then send nothing at all.
+    """
+
+    class NeverFocuses(FakeWindows):
+        def activate(self, target: object, cancel: object = None) -> bool:
+            self.calls.append("activate")
+            return False  # focus never observed to move
+
+    windows = NeverFocuses()
+    engine, keyboard, mouse, _, _ = build_engine(windows=windows)
+    report = engine.run(plan_of(TypeText(text="MUST_NOT_APPEAR")))
+
+    assert report.status is RunStatus.FAILED
+    assert keyboard.calls == [] and mouse.calls == []
+    assert "could not activate" in (report.error or "")
+
+
+def test_activation_receives_the_run_control_so_a_stop_is_heard() -> None:
+    """Activation can block for seconds on some platforms; it gets the token."""
+    seen: list[object] = []
+
+    class RecordsToken(FakeWindows):
+        def activate(self, target: object, cancel: object = None) -> bool:
+            seen.append(cancel)
+            return True
+
+    control = RunControl()
+    engine, _, _, _, _ = build_engine(windows=RecordsToken())
+    engine.run(plan_of(TypeText(text="hi")), control)
+    assert seen and seen[0] is control

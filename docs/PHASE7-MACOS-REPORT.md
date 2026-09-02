@@ -8,10 +8,10 @@ has been run, no window has been activated, and no key or click has been sent.
 
 | | |
 | --- | --- |
-| macOS execution attempted | **yes** — `--check`, `--diagnose`, and the verification harness |
+| macOS execution attempted | **yes** — diagnostics and a full harness run with real input |
 | Artifact built | no — the `build` job for `macos-14` has never run |
 | Artifact launched | no — run from a source checkout |
-| Real input executed | **no** |
+| Real input executed | **yes** — 38 of 48 checks passed |
 | Window enumeration executed | **yes** — 8 windows listed through the real adapter |
 | Signing | NOT PERFORMED — no Developer ID credentials |
 | Notarization | NOT PERFORMED — no credentials |
@@ -104,6 +104,99 @@ saved profile's "application identity" is coarse. Two windows of the same
 application are then indistinguishable by identity alone — the resolver
 correctly reports `TARGET_AMBIGUOUS` rather than guessing, and the saved window
 title is what disambiguates them. Two regression tests cover it.
+
+## Third run: full harness, 38 of 48 passed
+
+Executed on the same Mac with real input. This is the first end-to-end macOS
+evidence, and it found the most serious defect in the project's history.
+
+### Verified working (real input, observed)
+
+* Target discovery, after the PID fix.
+* **Dry run sent nothing** — the safety property holds.
+* Typing, and the named keys `enter`, `backspace`, `home`, `page_down`.
+* **Mouse movement landed on the requested point, took the requested time, and
+  the click arrived at the target.** This settles the Retina question: Quartz
+  input uses logical points, which is what the screen port already claims, so
+  the cosmetic `scale 1x` misreport does not affect where clicks land.
+* Emergency stop reported correctly; no action ran after a stop; a held mouse
+  button was released; a paused run stopped safely.
+* The global hotkey registered and did **not** start a run.
+* Timing measured inside its configured bounds; seeded timing reproducible.
+* Safety gates: a missing target and a capability-blocked target both produced
+  zero input.
+* Profiles: saved, reloaded after a restart, re-resolved by application
+  identity, ran with input arriving, and refused to resolve an absent
+  application. A stale handle still resolved through the application identity.
+* Adapter lifecycle: enumeration stable, no threads leaked, rebuildable.
+
+### CRITICAL — input reached a window the user had not selected
+
+```
++32.44s  DECOY  <- 'AUTOMATION_TEST'      the first run typed into the wrong window
++44.76s  TARGET <- everything afterwards landed correctly
+```
+
+The chain:
+
+1. The Automation permission cannot be preflighted, so `focus_verification` is
+   `unknown`.
+2. `WindowCapabilities.from_matrix` sets `can_verify_focus = False`, because it
+   only claims verification when *certain*.
+3. `PyWinCtlWindows.is_active` short-circuited on that boolean and returned
+   `None` — so **focus was never checked on macOS at all**.
+4. The engine treats `None` as "unknown, proceed".
+5. pywinctl's `activate()` returned success while the window server had not yet
+   moved keyboard focus, and the decoy still had it.
+
+Every later run hit the target because it was frontmost by then; only the first
+one, racing the decoy that had just been launched, went astray.
+
+**Fixed** in three places:
+
+* `is_active` now gates on whether the platform *forbids* the check, not on
+  whether it is certain. An unprobed permission is a reason to try, not to stop
+  looking.
+* `activate()` must **observe** the focus move: it calls pywinctl with
+  `wait=False` and then polls `is_active` itself, returning `False` if focus is
+  never confirmed.
+* The engine already refuses to send input when activation fails, so a
+  confirmed-failure now means zero input. Two engine-level regression tests
+  pin that.
+
+### Emergency stop took 10.7 seconds
+
+pywinctl's macOS `activate(wait=True)` retries in a loop, and every retry shells
+out to `osascript`; a single `TypeText` action measured **11.6 seconds**. The
+worker was inside that call and could not hear the stop, which also explains why
+the held-modifier test recorded no key events and why the hotkey test timed out.
+
+**Fixed**: the waiting is ours now, bounded and cancellable, and the run's
+cancel token is threaded through `WindowControlPort.activate` so a stop during
+activation is honoured on every platform. macOS activation is still slow — that
+is AppleScript — but it no longer blocks the stop.
+
+### Harness defects the run exposed (not product bugs)
+
+* `ctrl+a` arrived as `[Key_Meta, Key_A]`: **Qt swaps Ctrl and Meta on macOS**,
+  reporting the physical Control key as `Key_Meta`. The check now expects the
+  platform's own convention, and a new check verifies the thing that actually
+  matters — that `META` maps to **Command**, not Control.
+* Named-key checks used a 5 second budget, which slow activation exceeded; now
+  15 seconds.
+* The decoy lookup failed and aborted the whole activation check. It now reports
+  the windows it did see and carries on.
+* "the saved identity is the application" asserted a Linux-shaped value.
+  `app_id='Python'` is *correct* macOS behaviour — and
+  `handle_hint="('Python', 'Automation Verification Target')"` confirms in
+  practice the source finding that a macOS handle contains the window title.
+
+### Still unverified on macOS
+
+* Activation with a decoy focused — the check could not run once the decoy was
+  not enumerated. **This is the most important remaining test.**
+* The global hotkey actually stopping a run.
+* A non-US keyboard layout; a second monitor.
 
 ### Observed but not fixed
 
@@ -234,20 +327,20 @@ answer; the screen port already declares macOS coordinates as `logical`.
 | Input Monitoring reported separately | **PASS** | probes `available` via `CGPreflightListenEventAccess` |
 | Automation (System Events) prompt appears | NOT TESTED | new in this phase |
 | Window enumeration | **PASS** | 8 windows listed through the real pywinctl adapter |
-| Target activation (decoy focused) | NOT TESTED | release-blocking |
-| Activation failure → zero input | NOT TESTED | release-blocking |
+| Target activation (decoy focused) | **FAIL, then fixed** | input reached the decoy; fix unverified |
+| Activation failure → zero input | **PASS** | a missing target produced no input |
 | Focus re-verification | NOT TESTED | |
-| Text and Unicode input | NOT TESTED | needs Accessibility |
-| Named keys; `Key.INSERT` rejected at validation | NOT TESTED | |
+| Text and Unicode input | **PASS** | typed text arrived at the target |
+| Named keys | **PARTIAL** | enter, backspace, home, page_down passed; tab/left arrived late under slow activation |
 | `META` is Command, not Control (`cmd+a`) | NOT TESTED | release-blocking |
 | Key hold/release cleanup | NOT TESTED | release-blocking |
-| Mouse movement, duration, clicks | NOT TESTED | |
-| Retina coordinates (points vs pixels) | NOT TESTED | |
+| Mouse movement, duration, clicks | **PASS** | landed on the point, took the requested time, click arrived |
+| Retina coordinates (points vs pixels) | **PASS** | logical points; clicks land correctly |
 | Multi-monitor geometry | PARTIAL | single Retina display read correctly; scale reported as 1x (see above) |
 | Keyboard layouts (US + non-US) | NOT TESTED | |
-| Global hotkey `Ctrl+Shift+F9` | NOT TESTED | needs Input Monitoring |
-| Emergency stop matrix | NOT TESTED | release-blocking |
-| Profile save/restart/re-resolve | NOT TESTED | |
+| Global hotkey `Ctrl+Shift+F9` | **PARTIAL** | registers, does not start a run; stopping a run untested |
+| Emergency stop matrix | **PARTIAL** | stop, cleanup and pause passed; latency was 10.7 s (fixed, unverified) |
+| Profile save/restart/re-resolve | **PASS** | reloaded, re-resolved and ran |
 | Code signing | NOT PERFORMED | no credentials |
 | Notarization | NOT PERFORMED | no credentials |
 
