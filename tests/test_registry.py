@@ -53,11 +53,34 @@ def test_wayland_with_xwayland_enumerates_in_a_restricted_form() -> None:
     assert not xwayland.capabilities.can_activate, "activation is still not available"
 
 
-def test_macos_without_permission_gets_no_window_backend() -> None:
+def test_macos_without_automation_permission_gets_no_window_backend() -> None:
+    """Window listing on macOS is gated by Automation, not Accessibility.
+
+    pywinctl drives window enumeration and activation through AppleScript to
+    System Events, so Accessibility being granted says nothing about whether
+    windows can be listed.
+    """
     denied = describe_host(
-        PlatformName.MACOS, DisplayServer.QUARTZ, env={}, accessibility_trusted=False
+        PlatformName.MACOS,
+        DisplayServer.QUARTZ,
+        env={},
+        accessibility_trusted=True,
+        automation_trusted=False,
     )
     assert select_window_backend(denied) == "none"
+
+
+def test_macos_without_accessibility_can_still_list_windows() -> None:
+    """Input is blocked, but the window list is a different permission."""
+    host = describe_host(
+        PlatformName.MACOS,
+        DisplayServer.QUARTZ,
+        env={},
+        accessibility_trusted=False,
+        automation_trusted=True,
+    )
+    assert select_window_backend(host) == "pywinctl"
+    assert not host.capabilities.can_send_synthetic_input
 
 
 def test_building_an_unavailable_backend_raises_with_the_reason() -> None:

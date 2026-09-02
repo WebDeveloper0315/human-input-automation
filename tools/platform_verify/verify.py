@@ -151,6 +151,17 @@ class EventLog:
             time.sleep(0.05)
         return self.since(marker)
 
+    def wait_for_kinds(self, marker: int, kinds: tuple[str, ...],
+                       timeout: float = 10.0) -> list[dict[str, Any]]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            events = self.since(marker)
+            seen = {event["kind"] for event in events}
+            if all(kind in seen for kind in kinds):
+                return events
+            time.sleep(0.05)
+        return self.since(marker)
+
 
 def find_target(service: AutomationService, report: Report) -> TargetWindow | None:
     """Locate the verification target - and refuse anything that is not it."""
@@ -326,7 +337,7 @@ def check_mouse(service: AutomationService, target: TargetWindow, log: EventLog,
     point = target_click_point(log)
     marker = log.count()
     run_plan(service, plan_for(target, MouseMove(x=point[0], y=point[1]), MouseClick()))
-    events = log.wait_for(marker, 2, timeout=8)
+    events = log.wait_for_kinds(marker, ("mouse_press", "mouse_release"), timeout=8)
     kinds = [event["kind"] for event in events]
     clicked = "mouse_press" in kinds and "mouse_release" in kinds
     report.ok("mouse click arrived at the target", clicked, f"clicked {point}, events: {kinds}")

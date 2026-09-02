@@ -31,11 +31,16 @@ from .keymap import unsupported_keys
 
 MACOS_ACCESSIBILITY = "macOS Accessibility permission"
 MACOS_INPUT_MONITORING = "macOS Input Monitoring permission"
+#: Window control on macOS goes through AppleScript to "System Events", which
+#: is a *third*, separate grant. Source-verified: pywinctl's macOS backend runs
+#: ``osascript`` for getAllWindows, getActiveWindow and activate.
+MACOS_AUTOMATION = "macOS Automation permission (System Events)"
 
 #: Where the user grants each permission. Shown verbatim in the UI.
 PERMISSION_LOCATIONS = {
     MACOS_ACCESSIBILITY: "System Settings > Privacy & Security > Accessibility",
     MACOS_INPUT_MONITORING: "System Settings > Privacy & Security > Input Monitoring",
+    MACOS_AUTOMATION: "System Settings > Privacy & Security > Automation",
 }
 
 WAYLAND_NOTE = (
@@ -106,6 +111,33 @@ def macos_accessibility_trusted() -> bool | None:
         return None
 
 
+def macos_automation_trusted() -> bool | None:
+    """Whether this process may drive "System Events" via Apple Events.
+
+    A third permission, separate from Accessibility and Input Monitoring, and
+    the one that actually gates window enumeration, activation and focus
+    verification on macOS. ``None`` when it cannot be determined - which is the
+    usual answer, because asking would prompt the user.
+    """
+    if detect_platform() is not PlatformName.MACOS:
+        return None
+    try:
+        from Foundation import NSAppleEventDescriptor
+        from ScriptingBridge import AEDeterminePermissionToAutomateTarget
+    except Exception:
+        return None
+    try:  # 0 == noErr, i.e. permission already granted
+        target = NSAppleEventDescriptor.descriptorWithBundleIdentifier_(
+            "com.apple.systemevents"
+        )
+        status = AEDeterminePermissionToAutomateTarget(
+            target.aeDesc(), b"****", b"****", False
+        )
+        return int(status) == 0
+    except Exception:  # pragma: no cover - macOS only
+        return None
+
+
 def macos_input_monitoring_trusted() -> bool | None:
     """Whether this process may observe global key events on macOS.
 
@@ -164,10 +196,25 @@ def _windows_matrix() -> CapabilityMatrix:
 
 
 def _macos_matrix(
-    accessibility: bool | None, input_monitoring: bool | None
+    accessibility: bool | None,
+    input_monitoring: bool | None,
+    automation: bool | None = None,
 ) -> CapabilityMatrix:
-    """macOS gates window control and input behind Accessibility, and global key
-    observation behind the separate Input Monitoring permission."""
+    """macOS gates this application behind **three** separate permissions.
+
+    Attributed from the libraries' own source, not assumed:
+
+    * **Accessibility** - synthetic keyboard and mouse input (pynput's Quartz
+      event posting).
+    * **Automation (System Events)** - window enumeration, activation and focus
+      verification, because pywinctl's macOS backend drives them through
+      AppleScript.
+    * **Input Monitoring** - observing global key presses for the emergency
+      hotkey.
+
+    Holding one grants nothing about the others, so a user told merely to
+    "grant permissions" cannot tell which pane to open.
+    """
 
     def gated(name: CapabilityName, granted: bool | None, permission: str, what: str) -> Capability:
         if granted is True:
@@ -190,16 +237,21 @@ def _macos_matrix(
         )
 
     accessibility_gated = [
-        (CapabilityName.WINDOW_ENUMERATION, "listing other applications' windows"),
-        (CapabilityName.WINDOW_ACTIVATION, "activating another application's window"),
-        (CapabilityName.FOCUS_VERIFICATION, "reading which window is frontmost"),
         (CapabilityName.KEYBOARD_INPUT, "keyboard automation"),
         (CapabilityName.KEY_HOLD, "holding keys down"),
         (CapabilityName.MOUSE_MOVE, "mouse movement"),
         (CapabilityName.MOUSE_CLICK, "mouse clicks"),
     ]
+    automation_gated = [
+        (CapabilityName.WINDOW_ENUMERATION, "listing other applications' windows"),
+        (CapabilityName.WINDOW_ACTIVATION, "activating another application's window"),
+        (CapabilityName.FOCUS_VERIFICATION, "reading which window is frontmost"),
+    ]
     capabilities = [
         gated(name, accessibility, MACOS_ACCESSIBILITY, what) for name, what in accessibility_gated
+    ]
+    capabilities += [
+        gated(name, automation, MACOS_AUTOMATION, what) for name, what in automation_gated
     ]
     capabilities.append(
         gated(
@@ -312,12 +364,13 @@ def build_matrix(
     env: Mapping[str, str] | None = None,
     accessibility_trusted: bool | None = None,
     input_monitoring_trusted: bool | None = None,
+    automation_trusted: bool | None = None,
 ) -> CapabilityMatrix:
     """The capability matrix for a (platform, display server) pair."""
     if platform is PlatformName.WINDOWS:
         return _windows_matrix()
     if platform is PlatformName.MACOS:
-        return _macos_matrix(accessibility_trusted, input_monitoring_trusted)
+        return _macos_matrix(accessibility_trusted, input_monitoring_trusted, automation_trusted)
     if platform is PlatformName.LINUX and display_server is DisplayServer.X11:
         return _x11_matrix()
     if platform is PlatformName.LINUX and display_server is DisplayServer.WAYLAND:
@@ -339,6 +392,7 @@ def describe_host(
     env: Mapping[str, str] | None = None,
     accessibility_trusted: bool | None = None,
     input_monitoring_trusted: bool | None = None,
+    automation_trusted: bool | None = None,
 ) -> PlatformReport:
     """Build a :class:`PlatformReport` for the host (or a simulated one)."""
     platform = platform or detect_platform()
@@ -349,9 +403,16 @@ def describe_host(
             accessibility_trusted = macos_accessibility_trusted()
         if input_monitoring_trusted is None:
             input_monitoring_trusted = macos_input_monitoring_trusted()
+        if automation_trusted is None:
+            automation_trusted = macos_automation_trusted()
 
     matrix = build_matrix(
-        platform, display_server, env, accessibility_trusted, input_monitoring_trusted
+        platform,
+        display_server,
+        env,
+        accessibility_trusted,
+        input_monitoring_trusted,
+        automation_trusted,
     )
     capabilities = WindowCapabilities.from_matrix(matrix)
 

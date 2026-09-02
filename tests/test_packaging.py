@@ -327,3 +327,32 @@ def test_json_is_still_the_only_profile_format_dependency() -> None:
     assert dependencies.strip() == "", "the core must stay dependency-free"
     assert 'yaml = ["PyYAML' in text, "YAML stays optional"
     assert json is not None
+
+
+def test_the_packaging_spec_is_not_excluded_from_version_control() -> None:
+    """Regression: `.gitignore` had a blanket `*.spec`.
+
+    PyInstaller writes a `.spec` next to the script when invoked without one,
+    which is what that rule was for - but it also excluded the project's own
+    hand-written spec, so the packaging configuration was never committed and a
+    fresh clone could not build.
+    """
+    ignore = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+    assert "*.spec" not in ignore, "a blanket *.spec rule hides packaging/*.spec"
+    assert any(line.strip() == "!packaging/*.spec" for line in ignore)
+    assert (ROOT / "packaging" / "human-input-automation.spec").is_file()
+
+
+def test_the_macos_bundle_declares_the_apple_events_permission() -> None:
+    """Window control on macOS is an Apple Event; without the key it is refused.
+
+    pywinctl's macOS backend drives getAllWindows, getActiveWindow and activate
+    through AppleScript to System Events. macOS rejects that outright unless the
+    bundle declares a usage description.
+    """
+    spec = (ROOT / "packaging" / "human-input-automation.spec").read_text(encoding="utf-8")
+    assert "NSAppleEventsUsageDescription" in spec
+    # ...and still nothing it does not use.
+    for forbidden in ("NSCameraUsageDescription", "NSMicrophoneUsageDescription",
+                      "NSLocationUsageDescription", "NSContactsUsageDescription"):
+        assert forbidden not in spec

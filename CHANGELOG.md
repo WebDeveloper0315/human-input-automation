@@ -8,6 +8,48 @@ The application version and the profile schema version are independent: this
 release is 0.6.0 and writes profile **schema 1**, and a later application
 version may still write schema 1.
 
+## [0.7.1] - 2026-09-02
+
+Windows and macOS verification was the goal; **no machine of either kind was
+available**, so it did not happen. What did happen is a source-level audit of
+those adapter paths against the installed libraries, which found three macOS
+defects worth fixing before anyone tries.
+
+### Fixed
+
+- **macOS window control was attributed to the wrong permission.** pywinctl
+  drives window enumeration, activation and focus verification through
+  AppleScript to System Events, which macOS gates behind **Automation** — a
+  different grant from Accessibility. A user with an empty window list would
+  have been told to grant Accessibility, which would not have helped.
+  Automation is now a distinct capability with its own settings-pane location
+  and its own probe.
+- **The macOS bundle did not declare `NSAppleEventsUsageDescription`.** Without
+  it macOS refuses the Apple Event outright, so window control could never have
+  worked in a packaged build. It is the only privacy key declared.
+- **macOS window handles are `(application, title)`** — they change whenever the
+  title does. Activation matched strictly by handle, so a saved document or a
+  switched tab would have failed the run. The adapter now falls back to the
+  window's process, and only when exactly one window matches; several
+  candidates is still refused, as is a different process.
+
+### Added
+
+- `tools/platform_verify/run_desktop_session.py`: the verification harness now
+  runs on any desktop session, so Windows and macOS testers use the same
+  ~51 checks. It requires `--confirm` before generating real input.
+- `docs/PHASE7-WINDOWS-REPORT.md` and `docs/PHASE7-MACOS-REPORT.md`: every
+  source-verified finding, and a matrix of everything still NOT TESTED.
+
+### Known limitations
+
+- **Windows and macOS remain entirely unverified.** No artifact built, no
+  application launched, no input sent, no permission granted. Their CI build
+  jobs have never run.
+- macOS signing and notarization: **NOT PERFORMED** — no credentials.
+- Linux/X11 remains verified only against an isolated X server with a minimal
+  window manager, not a full desktop.
+
 ## [0.7.0] - 2026-09-02
 
 Real-platform verification: the adapters were finally run against a real X

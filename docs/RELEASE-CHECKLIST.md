@@ -21,7 +21,11 @@ Before any manual testing, run the harness - it covers a large part of the
 checklist automatically and needs no desktop session:
 
 ```bash
+# Linux, isolated X server (needs Xvfb; cannot touch your desktop)
 tools/platform_verify/run_x11_session.sh /tmp/verify python
+
+# Windows, macOS, or a Linux desktop session (generates real input on it)
+python tools/platform_verify/run_desktop_session.py --confirm
 ```
 
 51 checks including real typing, activation against a decoy window, emergency
@@ -129,7 +133,11 @@ run.**
 - [ ] Grant Accessibility → quit and reopen → window enumeration and activation
       become available
 - [ ] Grant Input Monitoring → quit and reopen → the global hotkey works
-- [ ] Confirm granting one permission does **not** silently enable the other
+- [ ] Grant **Automation** (System Events) when prompted → quit and reopen →
+      the window list works. Confirm it is a *separate* prompt from Accessibility
+- [ ] Confirm granting one permission does **not** silently enable the others
+- [ ] With Accessibility granted but Automation denied: the window list is empty
+      and the banner names Automation, not Accessibility
 - [ ] **Activation:** target A selected, B focused, Start → input lands in A
 - [ ] Keyboard, including `cmd` being Command and **not** Ctrl (`cmd+a` selects
       all; if it triggers "select all" via Ctrl the mapping is wrong)

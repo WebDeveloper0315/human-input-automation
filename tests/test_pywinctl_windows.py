@@ -203,3 +203,59 @@ def test_unsupported_reason_explains_wayland() -> None:
     )
     assert reason is not None and "Wayland" in reason
     assert unsupported_reason(host()) is None
+
+
+# -- handles are not equally stable across platforms ----------------------
+def test_a_window_whose_handle_changed_is_matched_by_its_process() -> None:
+    """Regression: on macOS pywinctl's handle is ``(application, title)``.
+
+    Source-verified in ``_pywinctl_macos.getHandle``. The handle therefore
+    changes whenever the title does - a saved document, a switched tab - and a
+    strict handle match would fail to activate a window that is plainly still
+    there.
+    """
+    original = FakeWindow("('Editor', 'notes.txt')", "notes.txt", pid=4321, app="Editor")
+    adapter = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(original))
+    target = adapter.find("('Editor', 'notes.txt')")
+    assert target is not None
+
+    renamed = FakeWindow("('Editor', 'notes.txt *')", "notes.txt *", pid=4321, app="Editor")
+    after = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(renamed))
+    assert after.activate(target) is True
+    assert renamed.activated == 1
+
+
+def test_a_changed_handle_with_several_candidates_refuses_to_guess() -> None:
+    """Two windows of the same application: ambiguity must never be resolved."""
+    original = FakeWindow("('Editor', 'a.txt')", "a.txt", pid=4321, app="Editor")
+    adapter = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(original))
+    target = adapter.find("('Editor', 'a.txt')")
+    assert target is not None
+
+    first = FakeWindow("('Editor', 'b.txt')", "b.txt", pid=4321, app="Editor")
+    second = FakeWindow("('Editor', 'c.txt')", "c.txt", pid=4321, app="Editor")
+    after = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(first, second))
+    assert after.activate(target) is False
+    assert first.activated == 0 and second.activated == 0
+
+
+def test_a_changed_handle_never_matches_a_different_process() -> None:
+    original = FakeWindow("('Editor', 'a.txt')", "a.txt", pid=4321, app="Editor")
+    adapter = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(original))
+    target = adapter.find("('Editor', 'a.txt')")
+    assert target is not None
+
+    stranger = FakeWindow("('Bank', 'Account')", "Account", pid=9999, app="Bank")
+    after = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(stranger))
+    assert after.activate(target) is False
+    assert stranger.activated == 0
+
+
+def test_a_stable_windows_handle_still_takes_the_direct_path() -> None:
+    """On Windows the handle is an HWND and does not move."""
+    window = FakeWindow("0x42", "Notepad", pid=100, app="notepad.exe", active=True)
+    adapter = PyWinCtlWindows(host(), module(window))
+    target = adapter.find("0x42")
+    assert target is not None
+    assert adapter.activate(target) is True
+    assert adapter.is_active(target) is True

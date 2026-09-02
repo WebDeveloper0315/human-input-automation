@@ -114,6 +114,12 @@ ui -> application -> core <- adapters, with ports/ between core and adapters
   turn a NOT TESTED into a PASS without running it.
 * When a third-party library cannot do something, expose it through the
   capability system and say so - do not build a fragile workaround.
+* Reading a dependency's source is legitimate evidence for *fixing* a defect,
+  and is never evidence that a platform works. Label it "source-verified, not
+  executed".
+* Platform assumptions do not transfer. pywinctl's handle is an HWND on
+  Windows and `(app, title)` on macOS; pynput overrides key matching on Windows
+  but not on macOS or X11. Check the backend you mean.
 
 ## Invariants
 

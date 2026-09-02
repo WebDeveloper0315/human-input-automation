@@ -7,7 +7,11 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-*.spec
+# PyInstaller writes a .spec beside the script when invoked without one; the
+# project's own spec lives in packaging/ and must stay in version control - it
+# *is* the packaging configuration.
+/*.spec
+!packaging/*.spec
 .idea/
 .vscode/
 .DS_Store

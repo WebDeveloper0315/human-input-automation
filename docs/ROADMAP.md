@@ -173,7 +173,30 @@ Still open — these need physical machines:
 - [ ] Non-US keyboard layouts
 - [ ] Display scaling other than 100%, and macOS Retina coordinates
 
-## Phase 7 — Advanced
+## Phase 7 — Windows and macOS verification (blocked; audit and hardening done)
+
+- [x] Source-level audit of the Windows and macOS adapter paths against the
+      installed pywinctl, pynput and pymonctl backends
+- [x] macOS: window control attributed to **Automation (System Events)**, a
+      third permission, instead of Accessibility — with its own settings-pane
+      location and probe
+- [x] macOS: `NSAppleEventsUsageDescription` declared, without which window
+      control could never work in a packaged build
+- [x] macOS: unstable `(app, title)` handles handled by falling back to a
+      *unique* process match; ambiguity still refused
+- [x] Cross-platform harness launcher (`run_desktop_session.py`) so the same
+      checks run on Windows and macOS
+- [x] `docs/PHASE7-WINDOWS-REPORT.md` and `docs/PHASE7-MACOS-REPORT.md`
+- [x] Linux/X11 regression re-run after every change
+
+Blocked — no machine available:
+
+- [ ] Execute anything at all on Windows
+- [ ] Execute anything at all on macOS
+- [ ] Build the Windows and macOS artifacts (their CI jobs have never run)
+- [ ] macOS signing and notarization (no credentials)
+
+## Phase 8 — Advanced
 
 ## Out of scope
 
