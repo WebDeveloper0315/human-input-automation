@@ -239,7 +239,7 @@ These are different claims, and the project keeps them apart:
 | Platform | Real input | Activation | Mouse | Keyboard | Hotkey | Packaging | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Linux/X11 | Verified | Verified | Verified | Verified | Verified | Verified | **Pre-release** (isolated X server, not a full desktop) |
-| Linux/Wayland | Restricted by OS | Restricted by OS | Restricted by OS | Restricted by OS | Unavailable by OS | Verified | **Restricted** — reported, never worked around |
+| Linux/Wayland | Keyboard verified | Verified (XWayland apps) | **Unavailable by OS** | Verified (XWayland apps) | Unavailable by OS | Verified | **Partially verified** — keyboard yes, mouse no |
 | Windows | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Implemented but unverified** |
 | macOS | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Implemented but unverified** |
 
@@ -309,7 +309,7 @@ Behaviour on scaled displays (Windows 150%, macOS Retina) is unverified.
 ## Development
 
 ```bash
-pytest                                     # 704 tests with the gui extra, 597 without
+pytest                                     # 715 tests with the gui extra, 601 without
 pytest -m manual                           # host-dependent checks, opt-in
 ruff check .
 mypy src
@@ -330,6 +330,9 @@ or OS permission.
 
 Tests that need a real desktop are marked (`manual`, `windows`, `macos`,
 `linux`, `x11`, `wayland`) and excluded from the default run.
+
+**New here? `docs/GUIDE.md` covers running, using, troubleshooting and
+deploying.**
 
 See `docs/ARCHITECTURE.md` for the layering, the Qt threading rule and the
 design decisions, `packaging/README.md` for how the packages are built,

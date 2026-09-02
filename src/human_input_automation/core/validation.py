@@ -20,6 +20,7 @@ from .actions import (
     TypeText,
     Wait,
 )
+from .capabilities import CapabilityName
 from .errors import Severity, ValidationIssue, ValidationResult
 from .keys import Key, KeyLike, format_key
 from .plan import AutomationPlan, ExecutionLimits
@@ -106,6 +107,24 @@ def validate_target(
     return issues
 
 
+#: Which host capability each action needs. Keyboard actions follow the focused
+#: window; pointer actions need the pointer to be positionable, which is a
+#: separate thing a platform can refuse.
+_REQUIRED_CAPABILITY: tuple[tuple[type[Action], CapabilityName], ...] = (
+    (MouseMove, CapabilityName.MOUSE_MOVE),
+    (MouseClick, CapabilityName.MOUSE_CLICK),
+    (MouseDown, CapabilityName.MOUSE_CLICK),
+    (MouseUp, CapabilityName.MOUSE_CLICK),
+)
+
+
+def _capability_for(action: Action) -> CapabilityName | None:
+    for action_type, capability in _REQUIRED_CAPABILITY:
+        if isinstance(action, action_type):
+            return capability
+    return None
+
+
 def _keys_of(action: Action) -> tuple[KeyLike, ...]:
     """Every key an action would send."""
     if isinstance(action, (KeyPress, KeyDown, KeyUp)):
@@ -134,6 +153,19 @@ def validate_action(
     """Check one action against the limits, the host and the screen layout."""
     issues: list[ValidationIssue] = []
     location = f"actions[{index}]"
+
+    capability = _capability_for(action)
+    if host is not None and capability is not None:
+        state = host.matrix.state(capability)
+        if not state.is_permitted:
+            issues.append(
+                _error(
+                    "action.capability_unavailable",
+                    f"{action.describe()} cannot be performed on this system: "
+                    f"{host.matrix.reason(capability) or state.value}",
+                    location,
+                )
+            )
 
     if host is not None and host.unsupported_keys:
         unsupported = set(host.unsupported_keys)

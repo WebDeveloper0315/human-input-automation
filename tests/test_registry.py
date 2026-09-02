@@ -46,11 +46,19 @@ def test_linux_x11_and_wayland_do_not_get_the_same_treatment() -> None:
     assert not wayland.capabilities.can_activate
 
 
-def test_wayland_with_xwayland_enumerates_in_a_restricted_form() -> None:
+def test_wayland_with_xwayland_uses_the_x11_backend_for_x11_clients() -> None:
+    """Measured on GNOME/Wayland: XWayland windows can be listed and focused."""
     xwayland = host(PlatformName.LINUX, DisplayServer.WAYLAND, {"DISPLAY": ":0"})
     assert select_window_backend(xwayland) == "x11"
     assert xwayland.capabilities.can_enumerate
-    assert not xwayland.capabilities.can_activate, "activation is still not available"
+    assert xwayland.capabilities.can_activate
+    assert xwayland.capabilities.can_verify_focus
+
+
+def test_wayland_without_xwayland_has_no_window_backend() -> None:
+    bare = host(PlatformName.LINUX, DisplayServer.WAYLAND, {})
+    assert select_window_backend(bare) == "none"
+    assert not bare.capabilities.can_activate
 
 
 def test_macos_without_automation_permission_gets_no_window_backend() -> None:

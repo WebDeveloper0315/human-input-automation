@@ -403,3 +403,78 @@ def test_starting_twice_is_refused_without_crashing(harness: Any, pump: Any) -> 
     app.window.start_run()  # ignored: a run is already active
     app.window.emergency_stop()
     assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+# -- getting out of the way while running ---------------------------------
+def test_starting_minimises_the_window_and_shows_the_stop_overlay(
+    harness: Any, pump: Any
+) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=5_000))
+    assert app.window.controls.minimise_while_running
+
+    app.window.start_run()
+    assert pump(lambda: app.window.state is UiState.RUNNING)
+
+    assert app.window.isMinimized(), "the window should step aside for the target"
+    assert app.window.stop_overlay.isVisible(), "the emergency stop must stay on screen"
+    assert app.window.stop_overlay.stop_button.isEnabled()
+
+    app.window.stop_overlay.stop_button.click()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+    assert app.keyboard.calls == []
+
+
+def test_the_window_comes_back_when_the_run_finishes(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(TypeText(text="hi"))
+
+    app.window.start_run()
+    assert pump(lambda: app.window.state is UiState.COMPLETED)
+    assert pump(lambda: not app.window.stop_overlay.isVisible())
+    assert not app.window.isMinimized(), "the window should return when the run ends"
+
+
+def test_minimising_can_be_turned_off(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=3_000))
+    app.window.controls.minimise_check.setChecked(False)
+
+    app.window.start_run()
+    assert pump(lambda: app.window.state is UiState.RUNNING)
+    assert not app.window.isMinimized()
+    assert not app.window.stop_overlay.isVisible()
+
+    app.window.emergency_stop()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+def test_the_overlay_can_restore_the_window_mid_run(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=5_000))
+
+    app.window.start_run()
+    assert pump(lambda: app.window.isMinimized())
+    app.window.stop_overlay.restore_button.click()
+    assert not app.window.isMinimized()
+    assert not app.window.stop_overlay.isVisible()
+
+    app.window.emergency_stop()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+def test_the_overlay_tracks_the_run_state(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=5_000))
+
+    app.window.start_run()
+    assert pump(lambda: app.window.stop_overlay.isVisible())
+    assert pump(lambda: "Running" in app.window.stop_overlay.status_label.text())
+
+    app.window.emergency_stop()
+    assert pump(lambda: app.window.state is UiState.STOPPED)

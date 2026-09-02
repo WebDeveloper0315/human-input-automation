@@ -65,6 +65,7 @@ from .profile_panel import ProfilePanel
 from .run_bridge import RunEventBridge
 from .run_controls import RunControls
 from .run_log import RunLog
+from .stop_overlay import StopOverlay
 from .target_panel import TargetPanel
 from .timing_panel import TimingPanel
 
@@ -114,6 +115,9 @@ class MainWindow(QMainWindow):
         self.dry_run_panel = DryRunPanel()
         self.run_log = RunLog()
         self.controls = RunControls()
+        #: Carries the emergency stop while the main window is minimised, so
+        #: the one control that must always be reachable still is.
+        self.stop_overlay = StopOverlay(self)
 
         self._build_layout()
         self._connect()
@@ -174,6 +178,8 @@ class MainWindow(QMainWindow):
         self.profile_panel.export_requested.connect(self.export_profile)
         self.profile_panel.resolve_requested.connect(self.resolve_profile_target)
         self.banner.details_requested.connect(self.show_onboarding)
+        self.stop_overlay.emergency_requested.connect(self.emergency_stop)
+        self.stop_overlay.restore_requested.connect(self.restore_from_run)
         self.controls.start_requested.connect(self.start_run)
         self.controls.pause_requested.connect(self.pause_run)
         self.controls.resume_requested.connect(self.resume_run)
@@ -622,6 +628,9 @@ class MainWindow(QMainWindow):
         except RuntimeError as error:  # a run is already in progress
             self._set_state(UiState.IDLE)
             self._show_message("Already running", str(error))
+            return
+        if self.controls.minimise_while_running:
+            self._minimise_for_run()
 
     @Slot()
     def pause_run(self) -> None:
@@ -654,6 +663,39 @@ class MainWindow(QMainWindow):
         self.dry_run_panel.show_view(dry_run_view(report, plan.target, delays))
         self._log("Dry run finished - no input was sent")
 
+    # -- getting out of the way --------------------------------------------
+    def _minimise_for_run(self) -> None:
+        """Step aside for the target, keeping the emergency stop on screen.
+
+        The window is minimised rather than merely lowered so it cannot cover
+        the target or take its focus back; the overlay keeps the stop control a
+        single click away, which is the reason minimising is safe at all.
+        """
+        self.stop_overlay.show_for_run("Starting...")
+        self._place_overlay()
+        self.showMinimized()
+        self._log("Window minimised for the run; the emergency stop stays on screen")
+
+    @Slot()
+    def restore_from_run(self) -> None:
+        """Bring the main window back and put the overlay away."""
+        self.stop_overlay.hide()
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _place_overlay(self) -> None:
+        """Top-right of the screen the main window is on, clear of most targets."""
+        # Typed as Any: Qt's stubs promise a QScreen, but a widget without a
+        # window handle really can return None at runtime.
+        screen: Any = self.screen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        size = self.stop_overlay.size()
+        self.stop_overlay.move(area.right() - size.width() - 24, area.top() + 24)
+
     # -- events ------------------------------------------------------------
     @Slot(object)
     def _on_run_event(self, event: RunEvent) -> None:
@@ -672,9 +714,13 @@ class MainWindow(QMainWindow):
             self.controls.show_countdown("")
 
         self._set_state(next_state(self._state, event))
+        if self.stop_overlay.isVisible():
+            self.stop_overlay.show_state(controls_for(self._state).status_text)
 
         if isinstance(event, RunFinished):
             self.controls.show_countdown("")
+            if self.stop_overlay.isVisible() or self.isMinimized():
+                self.restore_from_run()
             report = self._service.last_report
             if report is not None:
                 self._log(friendly_error(report))
@@ -750,6 +796,7 @@ class MainWindow(QMainWindow):
             if callable(ignore):
                 ignore()
             return
+        self.stop_overlay.hide()
         if self._service.is_running:
             self._service.emergency_stop()
             self._service.join(2.0)

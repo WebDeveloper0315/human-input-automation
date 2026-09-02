@@ -49,8 +49,20 @@ WAYLAND_NOTE = (
 )
 
 XWAYLAND_NOTE = (
-    "XWayland is present: X11 clients can be listed and may receive input, "
+    "XWayland is present: X11 clients can be listed, focused and driven, "
     "but native Wayland windows are invisible to it"
+)
+
+WAYLAND_POINTER_NOTE = (
+    "Wayland ignores requests to move the pointer, so a click cannot be aimed; "
+    "it would land wherever the pointer already is. Keyboard automation still "
+    "works, because it follows the focused window"
+)
+
+XWAYLAND_FOCUS_NOTE = (
+    "focus is readable and settable for X11 (XWayland) clients through EWMH; "
+    "verified on GNOME/Wayland, where the compositor honours activation requests "
+    "for X11 windows"
 )
 
 _UNPROBED = "capabilities were not probed"
@@ -317,8 +329,24 @@ def _wayland_matrix(xwayland: bool) -> CapabilityMatrix:
             CapabilityState.RESTRICTED if xwayland else blocked,
             XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
         ),
-        _capability(CapabilityName.WINDOW_ACTIVATION, blocked, WAYLAND_NOTE),
-        _capability(CapabilityName.FOCUS_VERIFICATION, blocked, WAYLAND_NOTE),
+        # Measured on GNOME/Wayland: the compositor honours an EWMH
+        # _NET_ACTIVE_WINDOW request for an XWayland client, focus moves, and
+        # input follows. Restricted rather than unavailable - it works for X11
+        # clients and cannot work for native Wayland windows.
+        _capability(
+            CapabilityName.WINDOW_ACTIVATION,
+            CapabilityState.RESTRICTED if xwayland else blocked,
+            XWAYLAND_FOCUS_NOTE if xwayland else WAYLAND_NOTE,
+        ),
+        # Available - for the windows that can be targeted at all. Only X11
+        # clients are enumerable here, and _NET_ACTIVE_WINDOW reports their
+        # focus accurately, so activation can be positively confirmed rather
+        # than assumed.
+        _capability(
+            CapabilityName.FOCUS_VERIFICATION,
+            CapabilityState.AVAILABLE if xwayland else blocked,
+            XWAYLAND_FOCUS_NOTE if xwayland else WAYLAND_NOTE,
+        ),
         _capability(
             CapabilityName.KEYBOARD_INPUT,
             CapabilityState.RESTRICTED if xwayland else blocked,
@@ -329,16 +357,13 @@ def _wayland_matrix(xwayland: bool) -> CapabilityMatrix:
             CapabilityState.RESTRICTED if xwayland else blocked,
             XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
         ),
-        _capability(
-            CapabilityName.MOUSE_MOVE,
-            CapabilityState.RESTRICTED if xwayland else blocked,
-            XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
-        ),
-        _capability(
-            CapabilityName.MOUSE_CLICK,
-            CapabilityState.RESTRICTED if xwayland else blocked,
-            XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
-        ),
+        # Measured on GNOME/Wayland: XTEST pointer warping is ignored - the
+        # cursor does not move, whatever is requested. A click would therefore
+        # land wherever the pointer already happens to be, which may be any
+        # window at all, so clicking is unavailable rather than restricted.
+        # Keyboard input is unaffected: it follows focus, which we can set.
+        _capability(CapabilityName.MOUSE_MOVE, blocked, WAYLAND_POINTER_NOTE),
+        _capability(CapabilityName.MOUSE_CLICK, blocked, WAYLAND_POINTER_NOTE),
         _capability(
             CapabilityName.GLOBAL_HOTKEY,
             blocked,

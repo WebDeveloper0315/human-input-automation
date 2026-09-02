@@ -378,3 +378,49 @@ def test_dry_run_panel_renders_a_view() -> None:
     assert panel.action_lines == ["1. type 'hi'", "2. press enter"]
     assert "1.2 s" in panel.duration_label.text()
     assert "focus cannot be verified" in panel.result_label.text()
+
+
+# -- stop overlay ---------------------------------------------------------
+def test_the_stop_overlay_carries_a_reachable_emergency_stop() -> None:
+    """Minimising hides the main window; the stop must not go with it."""
+    from PySide6.QtCore import Qt
+
+    from human_input_automation.ui.stop_overlay import StopOverlay
+
+    overlay = StopOverlay()
+    fired: list[int] = []
+    overlay.emergency_requested.connect(lambda: fired.append(1))
+
+    assert overlay.stop_button.accessibleName() == "Emergency stop"
+    assert overlay.stop_button.shortcut().toString() == "Ctrl+."
+    assert overlay.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+    overlay.stop_button.click()
+    assert fired == [1]
+    overlay.close()
+
+
+def test_the_stop_overlay_shows_the_run_state_and_can_restore() -> None:
+    from human_input_automation.ui.stop_overlay import StopOverlay
+
+    overlay = StopOverlay()
+    restored: list[int] = []
+    overlay.restore_requested.connect(lambda: restored.append(1))
+
+    overlay.show_state("Counting down...")
+    assert overlay.status_label.text() == "Counting down..."
+    overlay.restore_button.click()
+    assert restored == [1]
+    overlay.close()
+
+
+def test_run_controls_offer_the_minimise_preference() -> None:
+    controls = RunControls()
+    enabled = controls.minimise_while_running
+    assert enabled, "minimising during a run is the default"
+    controls.minimise_check.setChecked(False)
+    enabled = controls.minimise_while_running
+    assert not enabled
+
+    controls.apply_state(controls_for(UiState.RUNNING))
+    assert not controls.minimise_check.isEnabled(), "locked while a run is in flight"

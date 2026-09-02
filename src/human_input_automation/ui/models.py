@@ -278,6 +278,11 @@ def capability_banner(
 
     capabilities = host.capabilities
     backend_missing = any("not usable on this host" in problem for problem in problems)
+    restricted = [
+        capability
+        for capability in host.matrix
+        if capability.state is CapabilityState.RESTRICTED
+    ]
 
     if backend_missing:
         level = CapabilityLevel.UNAVAILABLE
@@ -293,6 +298,15 @@ def capability_banner(
         headline = (
             f"{_platform_label(host)} restricts window control; "
             "input can be sent but windows cannot be listed or focused."
+        )
+    elif restricted:
+        level = CapabilityLevel.RESTRICTED
+        names = ", ".join(
+            capability.name.value.replace("_", " ") for capability in restricted[:3]
+        )
+        headline = (
+            f"Automation works on {_platform_label(host)} with limits "
+            f"({names}); see the details below."
         )
     elif not capabilities.can_verify_focus:
         level = CapabilityLevel.UNKNOWN

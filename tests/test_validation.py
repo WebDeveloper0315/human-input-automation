@@ -243,3 +243,51 @@ def test_a_gap_between_monitors_is_rejected() -> None:
     )
     plan = AutomationPlan(make_target(), [MouseMove(x=2500, y=500)])
     assert not validate_plan(plan, screen=detached).ok
+
+
+# -- host capability gating ----------------------------------------------
+def wayland_host() -> PlatformReport:
+    """GNOME/Wayland with XWayland: keyboard works, the pointer cannot be moved."""
+    from human_input_automation.adapters.platform_info import describe_host
+
+    return describe_host(
+        PlatformName.LINUX, DisplayServer.WAYLAND, env={"DISPLAY": ":0"}
+    )
+
+
+def test_mouse_actions_are_rejected_where_the_pointer_cannot_be_moved() -> None:
+    """Regression: measured on GNOME/Wayland, XTEST pointer warping is ignored.
+
+    A click would land wherever the pointer already happens to be - which may be
+    any window at all - so the plan must be refused rather than aimed blindly.
+    """
+    from human_input_automation.core.actions import MouseClick, MouseDown, MouseMove, MouseUp
+
+    host = wayland_host()
+    for action in (MouseMove(x=10, y=10), MouseClick(), MouseDown(), MouseUp()):
+        plan = AutomationPlan(make_target(), [action])
+        result = validate_plan(plan, host=host)
+        issue = next(
+            (i for i in result.errors if i.code == "action.capability_unavailable"), None
+        )
+        assert issue is not None, f"{action.describe()} should be refused"
+        assert "pointer" in issue.message
+
+
+def test_keyboard_actions_are_still_allowed_on_wayland() -> None:
+    """Keyboard follows focus, which the compositor does let us set."""
+    from human_input_automation.core.actions import KeyPress, TypeText
+
+    host = wayland_host()
+    target = make_target(capabilities=host.capabilities)
+    plan = AutomationPlan(target, [TypeText(text="hello"), KeyPress(key="enter")])
+    assert validate_plan(plan, host=host).ok
+
+
+def test_mouse_actions_are_allowed_where_the_pointer_works() -> None:
+    from human_input_automation.adapters.platform_info import describe_host
+    from human_input_automation.core.actions import MouseClick
+
+    host = describe_host(PlatformName.LINUX, DisplayServer.X11, env={"DISPLAY": ":0"})
+    plan = AutomationPlan(make_target(), [MouseClick(x=10, y=10)])
+    assert validate_plan(plan, host=host).ok

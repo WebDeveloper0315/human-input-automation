@@ -8,6 +8,42 @@ The application version and the profile schema version are independent: this
 release is 0.6.0 and writes profile **schema 1**, and a later application
 version may still write schema 1.
 
+## [0.8.0] - 2026-09-02
+
+Driven by a real bug report from a Wayland desktop: the application refused to
+run against a Visual Studio Code window it had itself listed.
+
+### Fixed
+
+- **Window activation now works on Wayland for XWayland applications.** The
+  capability model marked activation "unavailable" on any Wayland session, so a
+  run against an XWayland window (VS Code, most Electron apps) failed with
+  "could not activate target window" before sending anything. Measured on
+  GNOME/Wayland: the compositor *does* honour an EWMH activation request for an
+  X11 client — focus moves, typed text arrives there, and a decoy window
+  receives nothing. Activation is now attempted and must be **positively
+  confirmed** before any input is sent.
+
+### Added
+
+- **Mouse actions are refused on Wayland**, with the reason. Measured on the
+  same session: the compositor ignores requests to move the pointer, so a click
+  cannot be aimed and would land on whatever the pointer happens to be over.
+  Keyboard automation is unaffected, because it follows the focus we can set.
+- **The window minimises while a run is in progress** (on by default,
+  switchable in the run controls), so it cannot cover the target or take its
+  focus. A compact always-on-top **emergency stop** stays on screen for the
+  duration, with `Ctrl+.` and a *Show window* button; the main window returns
+  when the run ends.
+- `docs/GUIDE.md` — running, using, troubleshooting and deploying, including a
+  per-platform table of what actually works.
+
+### Known limitations
+
+- Wayland: mouse automation is impossible and native Wayland windows cannot be
+  listed or focused. Use an X11 session for full functionality.
+- Windows and macOS remain unverified on real hardware.
+
 ## [0.7.1] - 2026-09-02
 
 Windows and macOS verification was the goal; **no machine of either kind was
