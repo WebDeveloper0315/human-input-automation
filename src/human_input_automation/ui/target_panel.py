@@ -52,6 +52,7 @@ class TargetPanel(QGroupBox):
         self.table.verticalHeader().setVisible(False)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.table.setAccessibleName("Available target windows")
+        self.table.setMinimumHeight(96)  # header plus two full rows
         self.table.itemSelectionChanged.connect(self._on_selection_changed)
 
         self.reason_label = QLabel()

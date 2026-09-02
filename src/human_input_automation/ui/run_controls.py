@@ -20,7 +20,7 @@ from .models import ControlsState
 #: The emergency stop is styled to stand out, but its meaning is carried by its
 #: label and accessible name - never by colour alone.
 _EMERGENCY_STYLE = (
-    "QPushButton { background-color: #b3261e; color: white; font-weight: bold; padding: 12px; }"
+    "QPushButton { background-color: #b3261e; color: white; font-weight: bold; padding: 8px; }"
     "QPushButton:hover { background-color: #8c1d18; }"
     "QPushButton:focus { border: 2px solid #000000; }"
 )
@@ -39,6 +39,8 @@ class RunControls(QGroupBox):
     def __init__(self) -> None:
         super().__init__("Run")
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
         self.status_label = QLabel("Idle")
         self.status_label.setAccessibleName("Run state")

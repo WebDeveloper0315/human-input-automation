@@ -8,11 +8,12 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QDoubleSpinBox,
-    QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -46,11 +47,19 @@ class TimingPanel(QGroupBox):
         self._error = ""
 
         layout = QVBoxLayout(self)
-        form = QFormLayout()
-        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+
+        # Two columns: ten stacked rows made the panel taller than the window
+        # could spare, and the splitter then collapsed it to nothing.
+        form = QGridLayout()
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(4)
+        form.setColumnStretch(1, 1)
+        form.setColumnStretch(3, 1)
 
         defaults = timing_to_values(TimingProfile())
-        for spec in TIMING_FIELDS:
+        for index, spec in enumerate(TIMING_FIELDS):
             spin = QDoubleSpinBox()
             spin.setRange(spec.minimum, spec.maximum)
             spin.setDecimals(0)
@@ -58,9 +67,15 @@ class TimingPanel(QGroupBox):
             spin.setSuffix(spec.suffix)
             spin.setValue(float(defaults[spec.name]))
             spin.setAccessibleName(spec.label)
+            spin.setMinimumWidth(96)
             spin.valueChanged.connect(self._on_changed)
             self._spins[spec.name] = spin
-            form.addRow(spec.label, spin)
+
+            row, column = divmod(index, 2)
+            label = QLabel(spec.label)
+            label.setBuddy(spin)
+            form.addWidget(label, row, column * 2)
+            form.addWidget(spin, row, column * 2 + 1)
 
         self.seed_check = QCheckBox("Use fixed seed (reproducible timing)")
         self.seed_check.setAccessibleName("Use fixed timing seed")
@@ -74,6 +89,7 @@ class TimingPanel(QGroupBox):
         self.seed_spin.valueChanged.connect(self._on_changed)
 
         seed_row = QHBoxLayout()
+        seed_row.setContentsMargins(0, 0, 0, 0)
         seed_row.addWidget(self.seed_check)
         seed_row.addWidget(self.seed_spin)
         seed_row.addStretch(1)
@@ -101,6 +117,12 @@ class TimingPanel(QGroupBox):
         layout.addWidget(seed_widget)
         layout.addWidget(self.error_label)
         layout.addLayout(preview_row)
+        layout.addStretch(1)
+
+        # Enough room for the grid plus the seed row and the preview, so a
+        # splitter cannot squeeze the fields out of existence.
+        self.setMinimumHeight(self.sizeHint().height())
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         self.refresh_preview()
 

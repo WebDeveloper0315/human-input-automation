@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -101,7 +103,12 @@ class MainWindow(QMainWindow):
         self.unsaved_prompt: Callable[[], UnsavedChoice] | None = None
 
         self.setWindowTitle("Human Input Automation")
-        self.resize(1150, 850)
+        # Ask for enough height to show every panel at once; _fit_to_screen()
+        # clamps it to whatever the desktop actually offers, and the body
+        # scrolls below that. The minimum keeps the Start row and the emergency
+        # stop reachable even on a 1366x768 laptop.
+        self.setMinimumSize(880, 520)
+        self.resize(1180, 940)
 
         self.bridge = RunEventBridge()
         self.bridge.run_event.connect(self._on_run_event)
@@ -151,17 +158,57 @@ class MainWindow(QMainWindow):
         body.setStretchFactor(1, 2)
         body.setStretchFactor(2, 2)
 
+        # Nothing may collapse to nothing: a splitter will happily reduce a
+        # child to zero height, which is how the timing fields disappeared.
+        # Room for the header plus a couple of whole rows: a half-clipped row
+        # reads as a rendering fault.
+        self.target_panel.setMinimumHeight(185)
+        self.action_editor.setMinimumHeight(185)
+        self.dry_run_panel.setMinimumHeight(140)
+        self.run_log.setMinimumHeight(90)
+        for splitter in (top, middle, body):
+            splitter.setChildrenCollapsible(False)
+
+        # The panels have real minimum heights, and together they can exceed a
+        # short screen. Scrolling the body keeps every panel at a usable size
+        # instead of squeezing one of them out of existence - which is how the
+        # timing fields vanished on a 1080p display.
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setWidget(body)
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        body.setMinimumHeight(600)
+
         central = QWidget()
         layout = QVBoxLayout(central)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
         layout.addWidget(self.banner)
         layout.addWidget(self.profile_panel)
-        layout.addWidget(body, 1)
+        layout.addWidget(self.body_scroll, 1)
+        # The run controls sit outside the splitter and keep their own height,
+        # so Start and the emergency stop can never be squeezed off screen.
+        self.controls.setSizePolicy(
+            self.controls.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Fixed
+        )
         layout.addWidget(self.controls)
         self.setCentralWidget(central)
+        self._fit_to_screen()
 
         self.setTabOrder(self.target_panel, self.action_editor)
         self.setTabOrder(self.action_editor, self.timing_panel)
         self.setTabOrder(self.timing_panel, self.controls)
+
+    def _fit_to_screen(self) -> None:
+        """Never open taller or wider than the desktop it appears on."""
+        screen: Any = self.screen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(self.width(), max(self.minimumWidth(), available.width() - 80))
+        height = min(self.height(), max(self.minimumHeight(), available.height() - 80))
+        self.resize(width, height)
 
     def _connect(self) -> None:
         self.target_panel.refresh_requested.connect(self.refresh_targets)

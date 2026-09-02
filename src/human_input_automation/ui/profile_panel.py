@@ -41,6 +41,8 @@ class ProfilePanel(QGroupBox):
         self._loading = False
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
         self.combo = QComboBox()
         self.combo.setAccessibleName("Stored profiles")
@@ -57,6 +59,11 @@ class ProfilePanel(QGroupBox):
         picker.addWidget(QLabel("Profile:"))
         picker.addWidget(self.combo, 1)
         picker.addWidget(self.name_label)
+
+        self.resolve_button = QPushButton("Resolve target")
+        self.resolve_button.setAccessibleName("Resolve profile target")
+        self.resolve_button.setToolTip("Look for the profile's window again")
+        self.resolve_button.clicked.connect(self.resolve_requested.emit)
 
         self.new_button = QPushButton("New")
         self.save_button = QPushButton("Save")
@@ -87,24 +94,17 @@ class ProfilePanel(QGroupBox):
             button.setAccessibleName(name)
             buttons.addWidget(button)
         buttons.addStretch(1)
+        buttons.addWidget(self.resolve_button)
 
         self.status_label = QLabel()
-        self.status_label.setWordWrap(True)
+        self.status_label.setWordWrap(False)
         self.status_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.status_label.setAccessibleName("Profile target status")
 
-        self.resolve_button = QPushButton("Resolve target")
-        self.resolve_button.setAccessibleName("Resolve profile target")
-        self.resolve_button.setToolTip("Look for the profile's window again")
-        self.resolve_button.clicked.connect(self.resolve_requested.emit)
-
-        status_row = QHBoxLayout()
-        status_row.addWidget(self.status_label, 1)
-        status_row.addWidget(self.resolve_button)
 
         layout.addLayout(picker)
         layout.addLayout(buttons)
-        layout.addLayout(status_row)
+        layout.addWidget(self.status_label)
 
     # -- state -------------------------------------------------------------
     def set_profiles(self, summaries: Sequence[ProfileSummary], current_id: str | None) -> None:
@@ -127,11 +127,12 @@ class ProfilePanel(QGroupBox):
         )
 
     def set_status(self, view: TargetStatusView) -> None:
+        """One line in the panel; the full detail stays in the tooltip."""
         text = view.as_text()
-        if view.detail:
-            text = f"{text}\n{view.detail}"
-        self.status_label.setText(text)
-        self.status_label.setAccessibleDescription(text)
+        full = f"{text}\n{view.detail}" if view.detail else text
+        self.status_label.setText(f"{text}  -  {view.detail}" if view.detail else text)
+        self.status_label.setToolTip(full)
+        self.status_label.setAccessibleDescription(full)
 
     def set_locked(self, locked: bool) -> None:
         """Profiles cannot be changed while a run is in flight."""

@@ -478,3 +478,51 @@ def test_the_overlay_tracks_the_run_state(harness: Any, pump: Any) -> None:
 
     app.window.emergency_stop()
     assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+# -- layout fits the screen ----------------------------------------------
+def test_the_window_fits_a_short_desktop_and_keeps_the_controls_reachable(
+    harness: Any, qt_app: Any
+) -> None:
+    """Regression: the window opened taller than the desktop.
+
+    The Start row and the emergency stop were pushed off the bottom, and making
+    the window fit squeezed the timing fields out of existence instead.
+    """
+    app = harness()
+    window = app.window
+    window.resize(1120, 688)  # a 768 px laptop, minus chrome
+    window.show()
+    qt_app.processEvents()
+
+    fixed = window.banner.height() + window.profile_panel.height() + window.controls.height()
+    assert fixed < 320, f"the fixed chrome takes {fixed}px before any panel is shown"
+    assert window.controls.start_button.isVisible()
+    assert window.controls.emergency_button.isVisible()
+    assert all(spin.isVisible() for spin in window.timing_panel._spins.values()), (
+        "every timing field must remain visible"
+    )
+
+
+def test_the_body_scrolls_instead_of_collapsing_a_panel(harness: Any, qt_app: Any) -> None:
+    app = harness()
+    window = app.window
+    window.resize(900, 560)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.body_scroll.widgetResizable()
+    assert window.timing_panel.height() >= window.timing_panel.minimumHeight()
+    assert window.target_panel.height() >= 185
+    for splitter in window.findChildren(type(window.body_scroll.widget())):
+        assert not splitter.childrenCollapsible()
+
+
+def test_the_window_never_opens_larger_than_the_desktop(harness: Any) -> None:
+    app = harness()
+    screen = app.window.screen()
+    if screen is None:  # pragma: no cover - depends on the Qt platform plugin
+        pytest.skip("no screen available")
+    available = screen.availableGeometry()
+    assert app.window.width() <= max(app.window.minimumWidth(), available.width())
+    assert app.window.height() <= max(app.window.minimumHeight(), available.height())

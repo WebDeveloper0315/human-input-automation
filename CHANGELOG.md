@@ -8,6 +8,30 @@ The application version and the profile schema version are independent: this
 release is 0.6.0 and writes profile **schema 1**, and a later application
 version may still write schema 1.
 
+## [0.8.1] - 2026-09-02
+
+Layout and readability fixes, from a screenshot of the running application.
+
+### Fixed
+
+- **The capability banner took roughly a quarter of the window.** It printed
+  every platform note at full length, pushing the run controls off the bottom of
+  the screen and squeezing the timing fields to nothing. It is now a single
+  line: headline, a note count, and the button that opens the full detail. The
+  complete text is still in the tooltip and the platform dialog.
+- **The banner was unreadable in dark mode.** It set a light background colour
+  but left the text colour to the theme, so a dark theme drew light text on a
+  light panel. Background *and* foreground are now chosen together, with a dark
+  palette for dark themes.
+- **The timing fields could vanish.** Ten stacked rows made the panel taller
+  than the window could spare and the splitter collapsed it. The fields are now
+  a two-column grid, panels have real minimum heights, and splitters may no
+  longer collapse a child to nothing.
+- **The window could open taller than the desktop.** It now asks for a size that
+  shows every panel and clamps itself to the available screen; below that the
+  body scrolls, so no panel is ever clipped. The run controls sit outside the
+  scroll area, so Start and the emergency stop cannot be pushed off screen.
+
 ## [0.8.0] - 2026-09-02
 
 Driven by a real bug report from a Wayland desktop: the application refused to

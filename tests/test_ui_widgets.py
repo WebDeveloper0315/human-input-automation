@@ -50,8 +50,53 @@ def test_banner_renders_the_model_text() -> None:
     )
     banner.show_model(capability_banner(report))
     assert "LIMITED" in banner.headline_label.text()
-    assert "Wayland restricts window control" in banner.details_label.text()
-    assert banner.details_label.isVisibleTo(banner)
+    # The detail belongs in the tooltip and the dialog, not in the banner: it
+    # used to take a quarter of the window's height.
+    assert "Wayland restricts window control" in banner.details_text
+    assert "Wayland restricts window control" in banner.toolTip()
+    assert banner.count_label.isVisibleTo(banner)
+
+
+def test_the_banner_stays_one_line_tall() -> None:
+    """Regression: the banner grew to ~250 px and pushed the panels off screen."""
+    banner = CapabilityBanner()
+    report = PlatformReport(
+        platform=PlatformName.LINUX,
+        display_server=DisplayServer.WAYLAND,
+        capabilities=WindowCapabilities(can_send_synthetic_input=True),
+        warnings=tuple(f"a fairly long platform warning number {i}" for i in range(8)),
+    )
+    banner.show_model(capability_banner(report))
+    assert banner.sizeHint().height() < 90, banner.sizeHint()
+    assert not banner.headline_label.wordWrap()
+
+
+def test_the_banner_sets_its_own_text_colour_for_dark_themes() -> None:
+    """Regression: a hard-coded light background with the theme's default text
+    colour was unreadable in dark mode."""
+    from PySide6.QtGui import QColor, QPalette
+
+    banner = CapabilityBanner()
+    palette = banner.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e1e"))
+    banner.setPalette(palette)
+    banner.show_model(capability_banner(host_report()))
+
+    style = banner.styleSheet()
+    assert "color:" in style, "the banner must set a foreground, not inherit one"
+    model = banner.model
+    assert model is not None
+    background, foreground = banner._tint(model.level)
+    assert QColor(background).lightness() < 128, "a dark theme needs a dark tint"
+    assert QColor(foreground).lightness() > 128, "with light text on it"
+
+
+def host_report() -> PlatformReport:
+    return PlatformReport(
+        platform=PlatformName.LINUX,
+        display_server=DisplayServer.X11,
+        capabilities=WindowCapabilities.full(),
+    )
 
 
 def test_banner_shows_denied_without_colour_only_meaning() -> None:
