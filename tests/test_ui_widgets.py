@@ -50,8 +50,53 @@ def test_banner_renders_the_model_text() -> None:
     )
     banner.show_model(capability_banner(report))
     assert "LIMITED" in banner.headline_label.text()
-    assert "Wayland restricts window control" in banner.details_label.text()
-    assert banner.details_label.isVisibleTo(banner)
+    # The detail belongs in the tooltip and the dialog, not in the banner: it
+    # used to take a quarter of the window's height.
+    assert "Wayland restricts window control" in banner.details_text
+    assert "Wayland restricts window control" in banner.toolTip()
+    assert banner.count_label.isVisibleTo(banner)
+
+
+def test_the_banner_stays_one_line_tall() -> None:
+    """Regression: the banner grew to ~250 px and pushed the panels off screen."""
+    banner = CapabilityBanner()
+    report = PlatformReport(
+        platform=PlatformName.LINUX,
+        display_server=DisplayServer.WAYLAND,
+        capabilities=WindowCapabilities(can_send_synthetic_input=True),
+        warnings=tuple(f"a fairly long platform warning number {i}" for i in range(8)),
+    )
+    banner.show_model(capability_banner(report))
+    assert banner.sizeHint().height() < 90, banner.sizeHint()
+    assert not banner.headline_label.wordWrap()
+
+
+def test_the_banner_sets_its_own_text_colour_for_dark_themes() -> None:
+    """Regression: a hard-coded light background with the theme's default text
+    colour was unreadable in dark mode."""
+    from PySide6.QtGui import QColor, QPalette
+
+    banner = CapabilityBanner()
+    palette = banner.palette()
+    palette.setColor(QPalette.ColorRole.Window, QColor("#1e1e1e"))
+    banner.setPalette(palette)
+    banner.show_model(capability_banner(host_report()))
+
+    style = banner.styleSheet()
+    assert "color:" in style, "the banner must set a foreground, not inherit one"
+    model = banner.model
+    assert model is not None
+    background, foreground = banner._tint(model.level)
+    assert QColor(background).lightness() < 128, "a dark theme needs a dark tint"
+    assert QColor(foreground).lightness() > 128, "with light text on it"
+
+
+def host_report() -> PlatformReport:
+    return PlatformReport(
+        platform=PlatformName.LINUX,
+        display_server=DisplayServer.X11,
+        capabilities=WindowCapabilities.full(),
+    )
 
 
 def test_banner_shows_denied_without_colour_only_meaning() -> None:
@@ -378,3 +423,49 @@ def test_dry_run_panel_renders_a_view() -> None:
     assert panel.action_lines == ["1. type 'hi'", "2. press enter"]
     assert "1.2 s" in panel.duration_label.text()
     assert "focus cannot be verified" in panel.result_label.text()
+
+
+# -- stop overlay ---------------------------------------------------------
+def test_the_stop_overlay_carries_a_reachable_emergency_stop() -> None:
+    """Minimising hides the main window; the stop must not go with it."""
+    from PySide6.QtCore import Qt
+
+    from human_input_automation.ui.stop_overlay import StopOverlay
+
+    overlay = StopOverlay()
+    fired: list[int] = []
+    overlay.emergency_requested.connect(lambda: fired.append(1))
+
+    assert overlay.stop_button.accessibleName() == "Emergency stop"
+    assert overlay.stop_button.shortcut().toString() == "Ctrl+."
+    assert overlay.windowFlags() & Qt.WindowType.WindowStaysOnTopHint
+
+    overlay.stop_button.click()
+    assert fired == [1]
+    overlay.close()
+
+
+def test_the_stop_overlay_shows_the_run_state_and_can_restore() -> None:
+    from human_input_automation.ui.stop_overlay import StopOverlay
+
+    overlay = StopOverlay()
+    restored: list[int] = []
+    overlay.restore_requested.connect(lambda: restored.append(1))
+
+    overlay.show_state("Counting down...")
+    assert overlay.status_label.text() == "Counting down..."
+    overlay.restore_button.click()
+    assert restored == [1]
+    overlay.close()
+
+
+def test_run_controls_offer_the_minimise_preference() -> None:
+    controls = RunControls()
+    enabled = controls.minimise_while_running
+    assert enabled, "minimising during a run is the default"
+    controls.minimise_check.setChecked(False)
+    enabled = controls.minimise_while_running
+    assert not enabled
+
+    controls.apply_state(controls_for(UiState.RUNNING))
+    assert not controls.minimise_check.isEnabled(), "locked while a run is in flight"

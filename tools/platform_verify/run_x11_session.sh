@@ -56,8 +56,8 @@ start "$WORKDIR/wm.log" "$PYTHON" "$HERE/mini_wm.py" --seconds 900 >/dev/null
 sleep 2
 
 echo "== target window"
-start "$WORKDIR/target.log" "$PYTHON" "$HERE/target_app.py" \
-  --events "$WORKDIR/target.jsonl" --geometry 40,40,800,600 --seconds 880 >/dev/null
+TARGET_PID=$(start "$WORKDIR/target.log" "$PYTHON" "$HERE/target_app.py" \
+  --events "$WORKDIR/target.jsonl" --geometry 40,40,800,600 --seconds 880)
 sleep 3
 
 echo "== decoy window"
@@ -69,6 +69,7 @@ sleep 3
 echo "== verification"
 "$PYTHON" "$HERE/verify.py" \
   --events "$WORKDIR/target.jsonl" \
+  --target-pid "$TARGET_PID" \
   --decoy-events "$WORKDIR/decoy.jsonl" \
   --decoy-pid "$DECOY_PID" \
   --profiles "$WORKDIR/profiles" \

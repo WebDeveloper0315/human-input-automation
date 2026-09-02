@@ -11,9 +11,11 @@ than Windows and macOS do.
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from collections.abc import Mapping
+from typing import Any
 
 from ..core.capabilities import (
     Capability,
@@ -31,11 +33,16 @@ from .keymap import unsupported_keys
 
 MACOS_ACCESSIBILITY = "macOS Accessibility permission"
 MACOS_INPUT_MONITORING = "macOS Input Monitoring permission"
+#: Window control on macOS goes through AppleScript to "System Events", which
+#: is a *third*, separate grant. Source-verified: pywinctl's macOS backend runs
+#: ``osascript`` for getAllWindows, getActiveWindow and activate.
+MACOS_AUTOMATION = "macOS Automation permission (System Events)"
 
 #: Where the user grants each permission. Shown verbatim in the UI.
 PERMISSION_LOCATIONS = {
     MACOS_ACCESSIBILITY: "System Settings > Privacy & Security > Accessibility",
     MACOS_INPUT_MONITORING: "System Settings > Privacy & Security > Input Monitoring",
+    MACOS_AUTOMATION: "System Settings > Privacy & Security > Automation",
 }
 
 WAYLAND_NOTE = (
@@ -44,12 +51,21 @@ WAYLAND_NOTE = (
 )
 
 XWAYLAND_NOTE = (
-    "XWayland is present: X11 clients can be listed and may receive input, "
+    "XWayland is present: X11 clients can be listed, focused and driven, "
     "but native Wayland windows are invisible to it"
 )
 
-_UNPROBED = "capabilities were not probed"
+WAYLAND_POINTER_NOTE = (
+    "Wayland ignores requests to move the pointer, so a click cannot be aimed; "
+    "it would land wherever the pointer already is. Keyboard automation still "
+    "works, because it follows the focused window"
+)
 
+XWAYLAND_FOCUS_NOTE = (
+    "focus is readable and settable for X11 (XWayland) clients through EWMH; "
+    "verified on GNOME/Wayland, where the compositor honours activation requests "
+    "for X11 windows"
+)
 
 def detect_platform(platform_id: str | None = None) -> PlatformName:
     """Map ``sys.platform`` onto :class:`PlatformName`."""
@@ -106,6 +122,62 @@ def macos_accessibility_trusted() -> bool | None:
         return None
 
 
+def macos_automation_trusted() -> bool | None:
+    """Whether this process may drive "System Events" via Apple Events.
+
+    A third permission, separate from Accessibility and Input Monitoring, and
+    the one that actually gates window enumeration, activation and focus
+    verification on macOS. ``None`` when it cannot be determined - which is the
+    usual answer, because asking would prompt the user.
+    """
+    if detect_platform() is not PlatformName.MACOS:
+        return None
+
+    check = _load_automation_check()
+    if check is None:
+        return None
+    try:
+        from Foundation import NSAppleEventDescriptor
+    except Exception:
+        return None
+    try:  # 0 == noErr, i.e. permission already granted
+        target = NSAppleEventDescriptor.descriptorWithBundleIdentifier_(
+            "com.apple.systemevents"
+        )
+        # askUserIfNeeded=False: this must never raise a prompt of its own.
+        return int(check(target.aeDesc(), b"****", b"****", False)) == 0
+    except Exception:  # pragma: no cover - macOS only
+        return None
+
+
+#: PyObjC does not agree across versions about which framework wrapper exports
+#: ``AEDeterminePermissionToAutomateTarget``, so try the plausible ones rather
+#: than guessing. Failing to find it means "unknown", never "denied".
+_AUTOMATION_CHECK_MODULES = ("CoreServices", "Foundation", "ScriptingBridge", "AppKit")
+
+
+def _pyobjc_available() -> bool:
+    """Whether the PyObjC bridge is importable at all."""
+    try:
+        importlib.import_module("objc")
+    except Exception:
+        return False
+    return True
+
+
+def _load_automation_check() -> Any | None:
+    """Locate ``AEDeterminePermissionToAutomateTarget`` in whichever wrapper has it."""
+    for module_name in _AUTOMATION_CHECK_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        check = getattr(module, "AEDeterminePermissionToAutomateTarget", None)
+        if check is not None:
+            return check
+    return None
+
+
 def macos_input_monitoring_trusted() -> bool | None:
     """Whether this process may observe global key events on macOS.
 
@@ -115,12 +187,16 @@ def macos_input_monitoring_trusted() -> bool | None:
     """
     if detect_platform() is not PlatformName.MACOS:
         return None
+    # CGPreflightListenEventAccess is the documented check for Input
+    # Monitoring and lives in CoreGraphics, which PyObjC wraps as Quartz.
+    # (IOHIDCheckAccess is IOKit, which PyObjC does not wrap - asking for it
+    # was why this always answered "unknown" on a Mac with PyObjC installed.)
     try:
-        from Quartz import IOHIDCheckAccess, kIOHIDRequestTypeListenEvent
+        from Quartz import CGPreflightListenEventAccess
     except Exception:
         return None
-    try:  # 0 == kIOHIDAccessTypeGranted
-        return int(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)) == 0
+    try:
+        return bool(CGPreflightListenEventAccess())
     except Exception:  # pragma: no cover - macOS only
         return None
 
@@ -164,10 +240,31 @@ def _windows_matrix() -> CapabilityMatrix:
 
 
 def _macos_matrix(
-    accessibility: bool | None, input_monitoring: bool | None
+    accessibility: bool | None,
+    input_monitoring: bool | None,
+    automation: bool | None = None,
 ) -> CapabilityMatrix:
-    """macOS gates window control and input behind Accessibility, and global key
-    observation behind the separate Input Monitoring permission."""
+    """macOS gates this application behind **three** separate permissions.
+
+    Attributed from the libraries' own source, not assumed:
+
+    * **Accessibility** - synthetic keyboard and mouse input (pynput's Quartz
+      event posting).
+    * **Automation (System Events)** - window enumeration, activation and focus
+      verification, because pywinctl's macOS backend drives them through
+      AppleScript.
+    * **Input Monitoring** - observing global key presses for the emergency
+      hotkey.
+
+    Holding one grants nothing about the others, so a user told merely to
+    "grant permissions" cannot tell which pane to open.
+    """
+
+    unknown_hint = (
+        "this build cannot query it"
+        if _pyobjc_available()
+        else "PyObjC is not installed, so it cannot be queried"
+    )
 
     def gated(name: CapabilityName, granted: bool | None, permission: str, what: str) -> Capability:
         if granted is True:
@@ -183,23 +280,29 @@ def _macos_matrix(
         return _capability(
             name,
             CapabilityState.UNKNOWN,
-            f"{permission} could not be verified (install PyObjC for a definite answer); "
-            f"{what} may silently do nothing until it is granted",
+            f"{permission} has not been confirmed ({unknown_hint}); macOS will ask the "
+            f"first time it is needed, and until it is granted {what} silently does "
+            f"nothing. Grant it in {PERMISSION_LOCATIONS[permission]}",
             permission=permission,
             requires_restart=True,
         )
 
     accessibility_gated = [
-        (CapabilityName.WINDOW_ENUMERATION, "listing other applications' windows"),
-        (CapabilityName.WINDOW_ACTIVATION, "activating another application's window"),
-        (CapabilityName.FOCUS_VERIFICATION, "reading which window is frontmost"),
         (CapabilityName.KEYBOARD_INPUT, "keyboard automation"),
         (CapabilityName.KEY_HOLD, "holding keys down"),
         (CapabilityName.MOUSE_MOVE, "mouse movement"),
         (CapabilityName.MOUSE_CLICK, "mouse clicks"),
     ]
+    automation_gated = [
+        (CapabilityName.WINDOW_ENUMERATION, "listing other applications' windows"),
+        (CapabilityName.WINDOW_ACTIVATION, "activating another application's window"),
+        (CapabilityName.FOCUS_VERIFICATION, "reading which window is frontmost"),
+    ]
     capabilities = [
         gated(name, accessibility, MACOS_ACCESSIBILITY, what) for name, what in accessibility_gated
+    ]
+    capabilities += [
+        gated(name, automation, MACOS_AUTOMATION, what) for name, what in automation_gated
     ]
     capabilities.append(
         gated(
@@ -265,8 +368,24 @@ def _wayland_matrix(xwayland: bool) -> CapabilityMatrix:
             CapabilityState.RESTRICTED if xwayland else blocked,
             XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
         ),
-        _capability(CapabilityName.WINDOW_ACTIVATION, blocked, WAYLAND_NOTE),
-        _capability(CapabilityName.FOCUS_VERIFICATION, blocked, WAYLAND_NOTE),
+        # Measured on GNOME/Wayland: the compositor honours an EWMH
+        # _NET_ACTIVE_WINDOW request for an XWayland client, focus moves, and
+        # input follows. Restricted rather than unavailable - it works for X11
+        # clients and cannot work for native Wayland windows.
+        _capability(
+            CapabilityName.WINDOW_ACTIVATION,
+            CapabilityState.RESTRICTED if xwayland else blocked,
+            XWAYLAND_FOCUS_NOTE if xwayland else WAYLAND_NOTE,
+        ),
+        # Available - for the windows that can be targeted at all. Only X11
+        # clients are enumerable here, and _NET_ACTIVE_WINDOW reports their
+        # focus accurately, so activation can be positively confirmed rather
+        # than assumed.
+        _capability(
+            CapabilityName.FOCUS_VERIFICATION,
+            CapabilityState.AVAILABLE if xwayland else blocked,
+            XWAYLAND_FOCUS_NOTE if xwayland else WAYLAND_NOTE,
+        ),
         _capability(
             CapabilityName.KEYBOARD_INPUT,
             CapabilityState.RESTRICTED if xwayland else blocked,
@@ -277,16 +396,13 @@ def _wayland_matrix(xwayland: bool) -> CapabilityMatrix:
             CapabilityState.RESTRICTED if xwayland else blocked,
             XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
         ),
-        _capability(
-            CapabilityName.MOUSE_MOVE,
-            CapabilityState.RESTRICTED if xwayland else blocked,
-            XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
-        ),
-        _capability(
-            CapabilityName.MOUSE_CLICK,
-            CapabilityState.RESTRICTED if xwayland else blocked,
-            XWAYLAND_NOTE if xwayland else WAYLAND_NOTE,
-        ),
+        # Measured on GNOME/Wayland: XTEST pointer warping is ignored - the
+        # cursor does not move, whatever is requested. A click would therefore
+        # land wherever the pointer already happens to be, which may be any
+        # window at all, so clicking is unavailable rather than restricted.
+        # Keyboard input is unaffected: it follows focus, which we can set.
+        _capability(CapabilityName.MOUSE_MOVE, blocked, WAYLAND_POINTER_NOTE),
+        _capability(CapabilityName.MOUSE_CLICK, blocked, WAYLAND_POINTER_NOTE),
         _capability(
             CapabilityName.GLOBAL_HOTKEY,
             blocked,
@@ -312,12 +428,13 @@ def build_matrix(
     env: Mapping[str, str] | None = None,
     accessibility_trusted: bool | None = None,
     input_monitoring_trusted: bool | None = None,
+    automation_trusted: bool | None = None,
 ) -> CapabilityMatrix:
     """The capability matrix for a (platform, display server) pair."""
     if platform is PlatformName.WINDOWS:
         return _windows_matrix()
     if platform is PlatformName.MACOS:
-        return _macos_matrix(accessibility_trusted, input_monitoring_trusted)
+        return _macos_matrix(accessibility_trusted, input_monitoring_trusted, automation_trusted)
     if platform is PlatformName.LINUX and display_server is DisplayServer.X11:
         return _x11_matrix()
     if platform is PlatformName.LINUX and display_server is DisplayServer.WAYLAND:
@@ -339,6 +456,7 @@ def describe_host(
     env: Mapping[str, str] | None = None,
     accessibility_trusted: bool | None = None,
     input_monitoring_trusted: bool | None = None,
+    automation_trusted: bool | None = None,
 ) -> PlatformReport:
     """Build a :class:`PlatformReport` for the host (or a simulated one)."""
     platform = platform or detect_platform()
@@ -349,22 +467,34 @@ def describe_host(
             accessibility_trusted = macos_accessibility_trusted()
         if input_monitoring_trusted is None:
             input_monitoring_trusted = macos_input_monitoring_trusted()
+        if automation_trusted is None:
+            automation_trusted = macos_automation_trusted()
 
     matrix = build_matrix(
-        platform, display_server, env, accessibility_trusted, input_monitoring_trusted
+        platform,
+        display_server,
+        env,
+        accessibility_trusted,
+        input_monitoring_trusted,
+        automation_trusted,
     )
     capabilities = WindowCapabilities.from_matrix(matrix)
 
     warnings: list[str] = []
     seen: set[str] = set()
+    seen_permissions: set[str] = set()
     for capability in matrix:
-        if capability.state in (CapabilityState.AVAILABLE,):
+        if capability.state is CapabilityState.AVAILABLE:
             continue
+        # One note per permission: four near-identical lines that differ only in
+        # which capability they gate is noise, not information.
+        if capability.permission:
+            if capability.permission in seen_permissions:
+                continue
+            seen_permissions.add(capability.permission)
         if capability.reason and capability.reason not in seen:
             seen.add(capability.reason)
             warnings.append(capability.reason)
-    if matrix.state(CapabilityName.WINDOW_ENUMERATION) is CapabilityState.UNKNOWN:
-        warnings.append(_UNPROBED)
 
     return PlatformReport(
         platform=platform,

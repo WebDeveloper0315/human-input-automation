@@ -403,3 +403,126 @@ def test_starting_twice_is_refused_without_crashing(harness: Any, pump: Any) -> 
     app.window.start_run()  # ignored: a run is already active
     app.window.emergency_stop()
     assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+# -- getting out of the way while running ---------------------------------
+def test_starting_minimises_the_window_and_shows_the_stop_overlay(
+    harness: Any, pump: Any
+) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=5_000))
+    assert app.window.controls.minimise_while_running
+
+    app.window.start_run()
+    assert pump(lambda: app.window.state is UiState.RUNNING)
+
+    assert app.window.isMinimized(), "the window should step aside for the target"
+    assert app.window.stop_overlay.isVisible(), "the emergency stop must stay on screen"
+    assert app.window.stop_overlay.stop_button.isEnabled()
+
+    app.window.stop_overlay.stop_button.click()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+    assert app.keyboard.calls == []
+
+
+def test_the_window_comes_back_when_the_run_finishes(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(TypeText(text="hi"))
+
+    app.window.start_run()
+    assert pump(lambda: app.window.state is UiState.COMPLETED)
+    assert pump(lambda: not app.window.stop_overlay.isVisible())
+    assert not app.window.isMinimized(), "the window should return when the run ends"
+
+
+def test_minimising_can_be_turned_off(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=3_000))
+    app.window.controls.minimise_check.setChecked(False)
+
+    app.window.start_run()
+    assert pump(lambda: app.window.state is UiState.RUNNING)
+    assert not app.window.isMinimized()
+    assert not app.window.stop_overlay.isVisible()
+
+    app.window.emergency_stop()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+def test_the_overlay_can_restore_the_window_mid_run(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=5_000))
+
+    app.window.start_run()
+    assert pump(lambda: app.window.isMinimized())
+    app.window.stop_overlay.restore_button.click()
+    assert not app.window.isMinimized()
+    assert not app.window.stop_overlay.isVisible()
+
+    app.window.emergency_stop()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+def test_the_overlay_tracks_the_run_state(harness: Any, pump: Any) -> None:
+    app = harness()
+    app.select_first_target()
+    app.with_actions(Wait(duration_ms=5_000))
+
+    app.window.start_run()
+    assert pump(lambda: app.window.stop_overlay.isVisible())
+    assert pump(lambda: "Running" in app.window.stop_overlay.status_label.text())
+
+    app.window.emergency_stop()
+    assert pump(lambda: app.window.state is UiState.STOPPED)
+
+
+# -- layout fits the screen ----------------------------------------------
+def test_the_window_fits_a_short_desktop_and_keeps_the_controls_reachable(
+    harness: Any, qt_app: Any
+) -> None:
+    """Regression: the window opened taller than the desktop.
+
+    The Start row and the emergency stop were pushed off the bottom, and making
+    the window fit squeezed the timing fields out of existence instead.
+    """
+    app = harness()
+    window = app.window
+    window.resize(1120, 688)  # a 768 px laptop, minus chrome
+    window.show()
+    qt_app.processEvents()
+
+    fixed = window.banner.height() + window.profile_panel.height() + window.controls.height()
+    assert fixed < 320, f"the fixed chrome takes {fixed}px before any panel is shown"
+    assert window.controls.start_button.isVisible()
+    assert window.controls.emergency_button.isVisible()
+    assert all(spin.isVisible() for spin in window.timing_panel._spins.values()), (
+        "every timing field must remain visible"
+    )
+
+
+def test_the_body_scrolls_instead_of_collapsing_a_panel(harness: Any, qt_app: Any) -> None:
+    app = harness()
+    window = app.window
+    window.resize(900, 560)
+    window.show()
+    qt_app.processEvents()
+
+    assert window.body_scroll.widgetResizable()
+    assert window.timing_panel.height() >= window.timing_panel.minimumHeight()
+    assert window.target_panel.height() >= 185
+    for splitter in window.findChildren(type(window.body_scroll.widget())):
+        assert not splitter.childrenCollapsible()
+
+
+def test_the_window_never_opens_larger_than_the_desktop(harness: Any) -> None:
+    app = harness()
+    screen = app.window.screen()
+    if screen is None:  # pragma: no cover - depends on the Qt platform plugin
+        pytest.skip("no screen available")
+    available = screen.availableGeometry()
+    assert app.window.width() <= max(app.window.minimumWidth(), available.width())
+    assert app.window.height() <= max(app.window.minimumHeight(), available.height())

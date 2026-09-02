@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeySequence
 from PySide6.QtWidgets import (
+    QCheckBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -19,7 +20,7 @@ from .models import ControlsState
 #: The emergency stop is styled to stand out, but its meaning is carried by its
 #: label and accessible name - never by colour alone.
 _EMERGENCY_STYLE = (
-    "QPushButton { background-color: #b3261e; color: white; font-weight: bold; padding: 12px; }"
+    "QPushButton { background-color: #b3261e; color: white; font-weight: bold; padding: 8px; }"
     "QPushButton:hover { background-color: #8c1d18; }"
     "QPushButton:focus { border: 2px solid #000000; }"
 )
@@ -38,6 +39,8 @@ class RunControls(QGroupBox):
     def __init__(self) -> None:
         super().__init__("Run")
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(4)
 
         self.status_label = QLabel("Idle")
         self.status_label.setAccessibleName("Run state")
@@ -55,6 +58,14 @@ class RunControls(QGroupBox):
         self.countdown_spin.setSuffix(" s countdown")
         self.countdown_spin.setAccessibleName("Countdown before starting")
         self.countdown_spin.setToolTip("Seconds to wait before the target is activated")
+
+        self.minimise_check = QCheckBox("Minimise while running")
+        self.minimise_check.setChecked(True)
+        self.minimise_check.setAccessibleName("Minimise the window while running")
+        self.minimise_check.setToolTip(
+            "Get this window out of the way during a run. A small always-on-top "
+            "emergency stop stays visible."
+        )
 
         self.start_button = QPushButton("Start")
         self.pause_button = QPushButton("Pause")
@@ -91,6 +102,7 @@ class RunControls(QGroupBox):
             button.setAccessibleName(name)
             row.addWidget(button)
         row.addWidget(self.countdown_spin)
+        row.addWidget(self.minimise_check)
         row.addStretch(1)
 
         status_row = QHBoxLayout()
@@ -112,6 +124,11 @@ class RunControls(QGroupBox):
     def countdown_seconds(self) -> float:
         return float(self.countdown_spin.value())
 
+    @property
+    def minimise_while_running(self) -> bool:
+        """Whether the main window should get out of the way during a run."""
+        return bool(self.minimise_check.isChecked())
+
     def apply_state(self, state: ControlsState) -> None:
         """Enable/disable controls. The emergency stop is never disabled."""
         self.start_button.setEnabled(state.start_enabled)
@@ -120,6 +137,7 @@ class RunControls(QGroupBox):
         self.stop_button.setEnabled(state.stop_enabled)
         self.dry_run_button.setEnabled(state.dry_run_enabled)
         self.countdown_spin.setEnabled(state.editing_enabled)
+        self.minimise_check.setEnabled(state.editing_enabled)
         self.emergency_button.setEnabled(True)
         self.status_label.setText(f"State: {state.status_text}")
         self.status_label.setAccessibleDescription(state.status_text)

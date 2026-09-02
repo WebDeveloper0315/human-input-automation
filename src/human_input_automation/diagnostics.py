@@ -139,10 +139,20 @@ def _hotkey_state(support: HotkeySupport) -> str:
 
 
 def _distinct_reasons(host: PlatformReport) -> tuple[str, ...]:
+    """One line per permission, not one per capability it happens to gate.
+
+    Three near-identical Automation notes differing only in the clause at the
+    end is noise; the permission is the thing the user has to act on.
+    """
     seen: list[str] = []
+    seen_permissions: set[str] = set()
     for capability in host.matrix:
         if capability.state is CapabilityState.AVAILABLE:
             continue
+        if capability.permission:
+            if capability.permission in seen_permissions:
+                continue
+            seen_permissions.add(capability.permission)
         if capability.reason and capability.reason not in seen:
             seen.append(capability.reason)
     return tuple(seen)

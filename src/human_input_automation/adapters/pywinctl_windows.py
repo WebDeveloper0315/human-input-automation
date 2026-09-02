@@ -105,12 +105,21 @@ class PyWinCtlWindows:
         process behind it is compared as well. A mismatch resolves to ``None``,
         which the engine turns into a failed run rather than typing into a
         different application.
+
+        Handles are not equally stable across platforms. On Windows a handle is
+        an ``HWND`` and does not change; on macOS pywinctl's handle is
+        ``(application, title)``, so it changes the moment the window's title
+        does - a saved document, a switched browser tab. When the exact handle
+        has gone, fall back to the process behind it, but **only** when exactly
+        one window matches: several candidates is ambiguous, and guessing is
+        precisely the failure this application must never have.
         """
         try:
-            windows = self._pywinctl.getAllWindows()
+            windows = list(self._pywinctl.getAllWindows())
         except Exception as exc:
             logger.info("pywinctl window lookup failed: %s", exc)
             return None
+
         for window in windows:
             if self._handle_of(window) != target.handle:
                 continue
@@ -118,9 +127,24 @@ class PyWinCtlWindows:
                 logger.info("window %s is no longer the selected target", target.handle)
                 return None
             return window
-        return None
+        return self._resolve_by_process(target, windows)
+
+    def _resolve_by_process(self, target: TargetWindow, windows: list[Any]) -> Any:
+        """The handle changed; identify the window by its process instead."""
+        if target.process_id is None and not target.process_name:
+            return None
+        candidates = [window for window in windows if self._same_window(target, window)]
+        if len(candidates) != 1:
+            if candidates:
+                logger.info(
+                    "%d windows match the target's process; refusing to guess", len(candidates)
+                )
+            return None
+        logger.info("target handle changed; matched by process instead")
+        return candidates[0]
 
     def _same_window(self, target: TargetWindow, window: Any) -> bool:
+        """Whether ``window`` belongs to the process the target was chosen from."""
         pid = self._pid_of(window)
         if target.process_id is not None and pid is not None:
             return target.process_id == pid

@@ -63,6 +63,7 @@ from human_input_automation.diagnostics import Diagnostics  # noqa: E402
 
 TARGET_APP_ID = "automation-verify-target"
 DECOY_APP_ID = "automation-verify-decoy"
+TARGET_WINDOW_TITLE = "Automation Verification Target"
 
 PASS = "PASS"
 FAIL = "FAIL"
@@ -135,6 +136,20 @@ class EventLog:
     def count(self) -> int:
         return len(self.read())
 
+    def pid(self) -> int | None:
+        """The process id the target reported when it started.
+
+        The most reliable way to identify the window: application identity is
+        spelled differently on every platform. On Linux the WM_CLASS carries the
+        Qt application name, but on macOS pywinctl reports the *process* name -
+        "Python" for a script - which matches every other Python window on the
+        machine.
+        """
+        for event in self.read():
+            if event.get("kind") == "ready" and event.get("pid"):
+                return int(event["pid"])
+        return None
+
     def typed_text(self, marker: int) -> str:
         return "".join(
             event.get("text", "")
@@ -151,29 +166,74 @@ class EventLog:
             time.sleep(0.05)
         return self.since(marker)
 
+    def wait_for_kinds(self, marker: int, kinds: tuple[str, ...],
+                       timeout: float = 10.0) -> list[dict[str, Any]]:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            events = self.since(marker)
+            seen = {event["kind"] for event in events}
+            if all(kind in seen for kind in kinds):
+                return events
+            time.sleep(0.05)
+        return self.since(marker)
 
-def find_target(service: AutomationService, report: Report) -> TargetWindow | None:
-    """Locate the verification target - and refuse anything that is not it."""
+
+def find_target(
+    service: AutomationService,
+    report: Report,
+    pid: int | None = None,
+    title: str | None = None,
+    app_id: str = TARGET_APP_ID,
+) -> TargetWindow | None:
+    """Locate the verification target - and refuse anything that is not it.
+
+    Matching order, most reliable first: the process id the target reported at
+    startup, then its application identity, then its exact window title. The
+    fallbacks exist because "application identity" is not the same thing on
+    every platform - on macOS it is the process name, so every Python window
+    looks alike.
+    """
     listing = service.discover_targets()
-    matches = [
-        window
-        for window in listing.targets
-        if (window.app_id or "").lower() == TARGET_APP_ID
-        or (window.process_name or "").lower() == TARGET_APP_ID
-    ]
+    windows = list(listing.targets)
+
+    matches: list[TargetWindow] = []
+    matched_by = ""
+    if pid is not None:
+        matches = [window for window in windows if window.process_id == pid]
+        matched_by = f"process id {pid}"
     if not matches:
+        matches = [
+            window
+            for window in windows
+            if (window.app_id or "").lower() == app_id
+            or (window.process_name or "").lower() == app_id
+        ]
+        matched_by = f"application identity {app_id!r}"
+    if not matches and title:
+        matches = [window for window in windows if (window.title or "") == title]
+        matched_by = f"window title {title!r}"
+
+    if not matches:
+        seen = "; ".join(
+            f"{window.title!r} (app={window.app_id!r}, pid={window.process_id})"
+            for window in windows[:6]
+        )
         report.add(
             "locate verification target",
             FAIL,
-            f"{len(listing.targets)} window(s) listed, none is the verification target "
-            f"({listing.reason or 'no reason given'})",
+            f"{len(windows)} window(s) listed, none matched pid={pid} or {app_id!r}. "
+            f"Reason: {listing.reason or 'none given'}. Saw: {seen or '(nothing)'}",
         )
         return None
     if len(matches) > 1:
-        report.add("locate verification target", FAIL, f"{len(matches)} candidates; expected one")
+        report.add(
+            "locate verification target",
+            FAIL,
+            f"{len(matches)} candidates matched by {matched_by}; expected one",
+        )
         return None
     target = matches[0]
-    report.add("locate verification target", PASS, target.describe())
+    report.add("locate verification target", PASS, f"{target.describe()} (by {matched_by})")
     return target
 
 
@@ -326,7 +386,7 @@ def check_mouse(service: AutomationService, target: TargetWindow, log: EventLog,
     point = target_click_point(log)
     marker = log.count()
     run_plan(service, plan_for(target, MouseMove(x=point[0], y=point[1]), MouseClick()))
-    events = log.wait_for(marker, 2, timeout=8)
+    events = log.wait_for_kinds(marker, ("mouse_press", "mouse_release"), timeout=8)
     kinds = [event["kind"] for event in events]
     clicked = "mouse_press" in kinds and "mouse_release" in kinds
     report.ok("mouse click arrived at the target", clicked, f"clicked {point}, events: {kinds}")
@@ -349,11 +409,14 @@ def check_activation_against_decoy(service: AutomationService, target: TargetWin
         if windows is None:
             report.add("focus the decoy window", SKIP, "no window discovery on this platform")
             return
-        candidates = [
-            window for window in windows.list_windows()
-            if window.process_id == decoy_pid
-            or (window.app_id or "").lower() == DECOY_APP_ID
-        ]
+        listed = list(windows.list_windows())
+        candidates = [window for window in listed if window.process_id == decoy_pid]
+        if not candidates:
+            candidates = [
+                window for window in listed if (window.app_id or "").lower() == DECOY_APP_ID
+            ]
+        if not candidates:
+            candidates = [window for window in listed if window.title == "Decoy Window"]
         if not candidates:
             report.add("focus the decoy window", FAIL, "the decoy window was not enumerated")
             return
@@ -661,6 +724,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--decoy-events", type=Path,
                         help="a second target's event file, for the activation test")
     parser.add_argument("--decoy-pid", type=int, help="process id of the decoy window")
+    parser.add_argument(
+        "--target-pid",
+        type=int,
+        help="process id of the target window (read from its event log when omitted)",
+    )
     parser.add_argument("--profiles", type=Path, help="profile directory to use for the test")
     parser.add_argument("--json", type=Path, help="write the machine-readable report here")
     parser.add_argument("--skip-input", action="store_true",
@@ -681,7 +749,12 @@ def main(argv: list[str] | None = None) -> int:
         check_environment(service, report)
 
         print("\n=== target discovery ===", flush=True)
-        target = find_target(service, report)
+        target = find_target(
+            service,
+            report,
+            pid=log.pid() or arguments.target_pid,
+            title=TARGET_WINDOW_TITLE,
+        )
         if target is None:
             print("\nThe verification target is not running; nothing else can be checked.")
             return 1
@@ -702,9 +775,10 @@ def main(argv: list[str] | None = None) -> int:
 
             if arguments.decoy_events and arguments.decoy_pid:
                 print("\n=== activation with a decoy window focused ===", flush=True)
+                decoy_log = EventLog(arguments.decoy_events)
                 check_activation_against_decoy(
-                    service, target, log, EventLog(arguments.decoy_events),
-                    arguments.decoy_pid, report
+                    service, target, log, decoy_log,
+                    decoy_log.pid() or arguments.decoy_pid, report
                 )
             else:
                 report.add("activation against a decoy window", SKIP,

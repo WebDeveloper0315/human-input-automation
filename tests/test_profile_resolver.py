@@ -208,3 +208,34 @@ def test_a_broken_saved_pattern_matches_nothing_rather_than_raising() -> None:
 @pytest.mark.parametrize("state", list(ProfileState))
 def test_only_a_resolved_target_is_runnable(state: ProfileState) -> None:
     assert state.is_runnable is (state is ProfileState.TARGET_RESOLVED)
+
+
+def test_macos_style_application_names_are_coarse() -> None:
+    """Observed on a real Mac: pywinctl reports the *process* name.
+
+    A Python script's windows all report "Python", so several unrelated windows
+    share one application identity. The resolver must call that ambiguous
+    rather than picking one - which is exactly what it does.
+    """
+    windows = [
+        window(handle="('Python', 'Target')", title="Target", process="Python", app_id="Python"),
+        window(handle="('Python', 'Decoy')", title="Decoy", process="Python", app_id="Python"),
+    ]
+    result = RESOLVER.resolve(identity(app_id="Python", process_name="Python",
+                                       title=None, handle_hint=None), windows)
+    assert result.state is ProfileState.TARGET_AMBIGUOUS
+    assert result.target is None
+
+
+def test_a_coarse_application_name_is_narrowed_by_the_window_title() -> None:
+    """The saved title disambiguates windows sharing one application name."""
+    windows = [
+        window(handle="('Python', 'Target')", title="Target", process="Python", app_id="Python"),
+        window(handle="('Python', 'Decoy')", title="Decoy", process="Python", app_id="Python"),
+    ]
+    result = RESOLVER.resolve(
+        identity(app_id="Python", process_name="Python", title="Target", handle_hint=None),
+        windows,
+    )
+    assert result.state is ProfileState.TARGET_RESOLVED
+    assert result.target is not None and result.target.title == "Target"

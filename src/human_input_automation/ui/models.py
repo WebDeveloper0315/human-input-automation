@@ -32,7 +32,7 @@ from ..core.actions import (
     TypeText,
     Wait,
 )
-from ..core.capabilities import CapabilityState
+from ..core.capabilities import CapabilityName, CapabilityState
 from ..core.errors import ValidationError
 from ..core.events import (
     ActionCompleted,
@@ -50,7 +50,7 @@ from ..core.events import (
     TargetActivated,
 )
 from ..core.keys import MouseButton, normalize_key, parse_shortcut
-from ..core.target import PlatformReport, TargetWindow
+from ..core.target import PlatformName, PlatformReport, TargetWindow
 from ..core.timing import TimingProfile, TimingService
 
 # ---------------------------------------------------------------------------
@@ -278,6 +278,16 @@ def capability_banner(
 
     capabilities = host.capabilities
     backend_missing = any("not usable on this host" in problem for problem in problems)
+    restricted = [
+        capability
+        for capability in host.matrix
+        if capability.state is CapabilityState.RESTRICTED
+    ]
+    unconfirmed = [
+        capability
+        for capability in host.matrix
+        if capability.state is CapabilityState.UNKNOWN and capability.permission
+    ]
 
     if backend_missing:
         level = CapabilityLevel.UNAVAILABLE
@@ -293,6 +303,28 @@ def capability_banner(
         headline = (
             f"{_platform_label(host)} restricts window control; "
             "input can be sent but windows cannot be listed or focused."
+        )
+    elif unconfirmed:
+        # A permission the user has not granted yet outranks a cosmetic limit:
+        # it is the thing most likely to make the next run do nothing.
+        level = CapabilityLevel.UNKNOWN
+        permissions = ", ".join(
+            dict.fromkeys(capability.permission or "" for capability in unconfirmed)
+        )
+        headline = (
+            f"{_platform_label(host)} has not confirmed: {permissions}. "
+            "macOS will ask the first time each is needed."
+            if host.platform is PlatformName.MACOS
+            else f"{_platform_label(host)} could not confirm: {permissions}."
+        )
+    elif restricted:
+        level = CapabilityLevel.RESTRICTED
+        names = ", ".join(
+            capability.name.value.replace("_", " ") for capability in restricted[:3]
+        )
+        headline = (
+            f"Automation works on {_platform_label(host)} with limits "
+            f"({names}); see the details below."
         )
     elif not capabilities.can_verify_focus:
         level = CapabilityLevel.UNKNOWN
@@ -316,16 +348,19 @@ def host_status_text(
     Shared by the ``--check`` CLI (which must work headless) and by the tests;
     it contains no Qt, so importing it never requires a display.
     """
-    capabilities = host.capabilities
     banner = capability_banner(host, problems, hotkey)
+    # Report the capability's own state word. Deriving yes/no from the booleans
+    # printed "no" for a capability that is merely unverified, which is exactly
+    # the confusion the five-state model exists to avoid.
     lines = [
         banner.as_text(),
         "",
         f"Platform: {host.platform.value} ({host.display_server.value})",
-        f"Send input: {_yes_no(capabilities.can_send_synthetic_input)}",
-        f"Enumerate windows: {_yes_no(capabilities.can_enumerate)}",
-        f"Activate windows: {_yes_no(capabilities.can_activate)}",
-        f"Verify focus: {_yes_no(capabilities.can_verify_focus)}",
+        f"Send input: {host.matrix.state(CapabilityName.KEYBOARD_INPUT).value}",
+        f"Enumerate windows: {host.matrix.state(CapabilityName.WINDOW_ENUMERATION).value}",
+        f"Activate windows: {host.matrix.state(CapabilityName.WINDOW_ACTIVATION).value}",
+        f"Verify focus: {host.matrix.state(CapabilityName.FOCUS_VERIFICATION).value}",
+        f"Mouse input: {host.matrix.state(CapabilityName.MOUSE_CLICK).value}",
     ]
     if host.matrix:
         lines.append("")
@@ -338,10 +373,6 @@ def host_status_text(
     if hotkey is not None:
         lines.append(f"Emergency hotkey: {hotkey.reason}")
     return "\n".join(lines)
-
-
-def _yes_no(value: bool) -> str:
-    return "yes" if value else "no"
 
 
 # ---------------------------------------------------------------------------

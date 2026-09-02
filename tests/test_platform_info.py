@@ -88,12 +88,28 @@ def test_wayland_reports_restricted_capabilities() -> None:
 
 
 def test_wayland_with_xwayland_may_reach_x11_clients_only() -> None:
+    """X11 clients can be listed, focused and driven; Wayland-native ones cannot.
+
+    Measured on GNOME/Wayland: the compositor honours an EWMH activation
+    request for an XWayland window, focus moves, and typed text arrives there
+    and nowhere else.
+    """
     report = describe_host(
         PlatformName.LINUX, DisplayServer.WAYLAND, env={"DISPLAY": ":0"}
     )
     assert report.capabilities.can_send_synthetic_input
-    assert not report.capabilities.can_activate
+    assert report.capabilities.can_activate
+    assert report.capabilities.can_verify_focus, (
+        "activation must be positively confirmable, not assumed"
+    )
     assert any("XWayland" in warning for warning in report.warnings)
+
+
+def test_wayland_without_xwayland_can_do_nothing() -> None:
+    report = describe_host(PlatformName.LINUX, DisplayServer.WAYLAND, env={})
+    assert not report.capabilities.can_activate
+    assert not report.capabilities.can_verify_focus
+    assert not report.capabilities.can_send_synthetic_input
 
 
 def test_unknown_platform_is_reported_honestly() -> None:
@@ -128,14 +144,16 @@ def test_wayland_matrix_marks_window_control_unavailable() -> None:
         assert matrix.state(name) is CapabilityState.UNAVAILABLE, name
 
 
-def test_xwayland_upgrades_input_and_enumeration_to_restricted_only() -> None:
-    """Verified on Ubuntu 26.04 GNOME/Wayland: X11 clients are visible, others are not."""
+def test_xwayland_upgrades_window_control_to_restricted_not_unavailable() -> None:
+    """Verified on Ubuntu 26.04 GNOME/Wayland: X11 clients are fully drivable."""
     matrix = describe_host(
         PlatformName.LINUX, DisplayServer.WAYLAND, env={"DISPLAY": ":0"}
     ).matrix
     assert matrix.state(CapabilityName.WINDOW_ENUMERATION) is CapabilityState.RESTRICTED
     assert matrix.state(CapabilityName.KEYBOARD_INPUT) is CapabilityState.RESTRICTED
-    assert matrix.state(CapabilityName.WINDOW_ACTIVATION) is CapabilityState.UNAVAILABLE
+    assert matrix.state(CapabilityName.WINDOW_ACTIVATION) is CapabilityState.RESTRICTED
+    assert matrix.state(CapabilityName.FOCUS_VERIFICATION) is CapabilityState.AVAILABLE
+    # Observing global key presses is a different mechanism, and still blocked.
     assert matrix.state(CapabilityName.GLOBAL_HOTKEY) is CapabilityState.UNAVAILABLE
 
 
@@ -195,3 +213,21 @@ def test_platform_key_gaps_are_carried_on_the_report() -> None:
 def test_xwayland_detection() -> None:
     assert has_xwayland({"DISPLAY": ":0"})
     assert not has_xwayland({})
+
+
+def test_the_automation_probe_reports_unknown_when_pyobjc_is_absent() -> None:
+    """No PyObjC (or a wrapper that moved the symbol) means unknown, not denied.
+
+    PyObjC versions disagree about which framework exports
+    AEDeterminePermissionToAutomateTarget, so the probe tries several and falls
+    back to "could not determine" rather than claiming the permission is missing.
+    """
+    from human_input_automation.adapters.platform_info import (
+        _load_automation_check,
+        macos_automation_trusted,
+    )
+
+    # On any non-macOS host the probe must not even try.
+    assert macos_automation_trusted() is None
+    # The loader must survive every module being absent.
+    assert _load_automation_check() is None or callable(_load_automation_check())

@@ -9,6 +9,7 @@ import pytest
 
 from human_input_automation.adapters.platform_info import (
     MACOS_ACCESSIBILITY,
+    MACOS_AUTOMATION,
     MACOS_INPUT_MONITORING,
     describe_host,
 )
@@ -21,23 +22,46 @@ from human_input_automation.ui.models import (
 )
 
 
-def macos(accessibility: bool | None, input_monitoring: bool | None) -> Any:
+def macos(
+    accessibility: bool | None,
+    input_monitoring: bool | None,
+    automation: bool | None = None,
+) -> Any:
     return describe_host(
         PlatformName.MACOS,
         DisplayServer.QUARTZ,
         env={},
         accessibility_trusted=accessibility,
         input_monitoring_trusted=input_monitoring,
+        automation_trusted=automation if automation is not None else accessibility,
     )
 
 
 # -- guidance model (no Qt) ----------------------------------------------
 def test_macos_permissions_are_reported_separately() -> None:
-    """Accessibility and Input Monitoring are different grants, not one prompt."""
-    guidance = permission_guidance(macos(False, False))
+    """Three different grants, not one prompt: each unlocks something else."""
+    guidance = permission_guidance(macos(False, False, automation=False))
     names = [item.permission for item in guidance]
-    assert names == sorted([MACOS_ACCESSIBILITY, MACOS_INPUT_MONITORING])
-    assert len(guidance) == 2
+    assert names == sorted([MACOS_ACCESSIBILITY, MACOS_AUTOMATION, MACOS_INPUT_MONITORING])
+    assert len(guidance) == 3
+
+
+def test_macos_window_control_is_attributed_to_automation() -> None:
+    """Regression: window control was wrongly attributed to Accessibility.
+
+    pywinctl's macOS backend runs AppleScript against System Events for
+    getAllWindows, getActiveWindow and activate, so the blocking permission is
+    Automation. Telling the user to grant Accessibility would not have helped.
+    """
+    guidance = {item.permission: item for item in permission_guidance(macos(False, False, False))}
+    automation = guidance[MACOS_AUTOMATION]
+    assert "window enumeration" in automation.why()
+    assert "window activation" in automation.why()
+    assert "Automation" in automation.where
+
+    accessibility = guidance[MACOS_ACCESSIBILITY]
+    assert "keyboard input" in accessibility.why()
+    assert "window enumeration" not in accessibility.why()
 
 
 def test_each_permission_says_what_it_blocks_and_where_to_grant_it() -> None:
@@ -55,13 +79,16 @@ def test_each_permission_says_what_it_blocks_and_where_to_grant_it() -> None:
     assert "Input Monitoring" in monitoring.where
 
 
-def test_holding_one_permission_does_not_satisfy_the_other() -> None:
-    outstanding = outstanding_permissions(macos(True, False))
+def test_holding_one_permission_does_not_satisfy_the_others() -> None:
+    outstanding = outstanding_permissions(macos(True, False, automation=True))
     assert [item.permission for item in outstanding] == [MACOS_INPUT_MONITORING]
+
+    outstanding = outstanding_permissions(macos(True, True, automation=False))
+    assert [item.permission for item in outstanding] == [MACOS_AUTOMATION]
 
 
 def test_a_granted_permission_is_not_outstanding() -> None:
-    assert outstanding_permissions(macos(True, True)) == ()
+    assert outstanding_permissions(macos(True, True, automation=True)) == ()
 
 
 def test_an_unverifiable_permission_says_so_rather_than_denied() -> None:
@@ -104,7 +131,7 @@ from human_input_automation.ui.onboarding import OnboardingDialog  # noqa: E402
 
 @pytest.mark.usefixtures("qt_app")
 def test_the_dialog_lists_each_permission_separately() -> None:
-    dialog = OnboardingDialog(first_run_summary(macos(False, False)))
+    dialog = OnboardingDialog(first_run_summary(macos(False, False, automation=False)))
     labels = [widget.text() for widget in dialog.findChildren(pyside.QtWidgets.QLabel)]
     joined = "\n".join(labels)
     assert MACOS_ACCESSIBILITY in joined
@@ -116,7 +143,7 @@ def test_the_dialog_lists_each_permission_separately() -> None:
 
 @pytest.mark.usefixtures("qt_app")
 def test_the_dialog_is_fine_with_nothing_outstanding() -> None:
-    dialog = OnboardingDialog(first_run_summary(macos(True, True)))
+    dialog = OnboardingDialog(first_run_summary(macos(True, True, automation=True)))
     assert dialog.summary.permissions == ()
     dialog.close()
 

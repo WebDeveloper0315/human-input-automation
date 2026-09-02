@@ -18,6 +18,8 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMainWindow,
     QMessageBox,
+    QScrollArea,
+    QSizePolicy,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -65,6 +67,7 @@ from .profile_panel import ProfilePanel
 from .run_bridge import RunEventBridge
 from .run_controls import RunControls
 from .run_log import RunLog
+from .stop_overlay import StopOverlay
 from .target_panel import TargetPanel
 from .timing_panel import TimingPanel
 
@@ -100,7 +103,12 @@ class MainWindow(QMainWindow):
         self.unsaved_prompt: Callable[[], UnsavedChoice] | None = None
 
         self.setWindowTitle("Human Input Automation")
-        self.resize(1150, 850)
+        # Ask for enough height to show every panel at once; _fit_to_screen()
+        # clamps it to whatever the desktop actually offers, and the body
+        # scrolls below that. The minimum keeps the Start row and the emergency
+        # stop reachable even on a 1366x768 laptop.
+        self.setMinimumSize(880, 520)
+        self.resize(1180, 940)
 
         self.bridge = RunEventBridge()
         self.bridge.run_event.connect(self._on_run_event)
@@ -114,6 +122,9 @@ class MainWindow(QMainWindow):
         self.dry_run_panel = DryRunPanel()
         self.run_log = RunLog()
         self.controls = RunControls()
+        #: Carries the emergency stop while the main window is minimised, so
+        #: the one control that must always be reachable still is.
+        self.stop_overlay = StopOverlay(self)
 
         self._build_layout()
         self._connect()
@@ -147,17 +158,57 @@ class MainWindow(QMainWindow):
         body.setStretchFactor(1, 2)
         body.setStretchFactor(2, 2)
 
+        # Nothing may collapse to nothing: a splitter will happily reduce a
+        # child to zero height, which is how the timing fields disappeared.
+        # Room for the header plus a couple of whole rows: a half-clipped row
+        # reads as a rendering fault.
+        self.target_panel.setMinimumHeight(185)
+        self.action_editor.setMinimumHeight(185)
+        self.dry_run_panel.setMinimumHeight(140)
+        self.run_log.setMinimumHeight(90)
+        for splitter in (top, middle, body):
+            splitter.setChildrenCollapsible(False)
+
+        # The panels have real minimum heights, and together they can exceed a
+        # short screen. Scrolling the body keeps every panel at a usable size
+        # instead of squeezing one of them out of existence - which is how the
+        # timing fields vanished on a 1080p display.
+        self.body_scroll = QScrollArea()
+        self.body_scroll.setWidget(body)
+        self.body_scroll.setWidgetResizable(True)
+        self.body_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        body.setMinimumHeight(600)
+
         central = QWidget()
         layout = QVBoxLayout(central)
+        layout.setContentsMargins(8, 6, 8, 6)
+        layout.setSpacing(6)
         layout.addWidget(self.banner)
         layout.addWidget(self.profile_panel)
-        layout.addWidget(body, 1)
+        layout.addWidget(self.body_scroll, 1)
+        # The run controls sit outside the splitter and keep their own height,
+        # so Start and the emergency stop can never be squeezed off screen.
+        self.controls.setSizePolicy(
+            self.controls.sizePolicy().horizontalPolicy(), QSizePolicy.Policy.Fixed
+        )
         layout.addWidget(self.controls)
         self.setCentralWidget(central)
+        self._fit_to_screen()
 
         self.setTabOrder(self.target_panel, self.action_editor)
         self.setTabOrder(self.action_editor, self.timing_panel)
         self.setTabOrder(self.timing_panel, self.controls)
+
+    def _fit_to_screen(self) -> None:
+        """Never open taller or wider than the desktop it appears on."""
+        screen: Any = self.screen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        width = min(self.width(), max(self.minimumWidth(), available.width() - 80))
+        height = min(self.height(), max(self.minimumHeight(), available.height() - 80))
+        self.resize(width, height)
 
     def _connect(self) -> None:
         self.target_panel.refresh_requested.connect(self.refresh_targets)
@@ -174,6 +225,8 @@ class MainWindow(QMainWindow):
         self.profile_panel.export_requested.connect(self.export_profile)
         self.profile_panel.resolve_requested.connect(self.resolve_profile_target)
         self.banner.details_requested.connect(self.show_onboarding)
+        self.stop_overlay.emergency_requested.connect(self.emergency_stop)
+        self.stop_overlay.restore_requested.connect(self.restore_from_run)
         self.controls.start_requested.connect(self.start_run)
         self.controls.pause_requested.connect(self.pause_run)
         self.controls.resume_requested.connect(self.resume_run)
@@ -622,6 +675,9 @@ class MainWindow(QMainWindow):
         except RuntimeError as error:  # a run is already in progress
             self._set_state(UiState.IDLE)
             self._show_message("Already running", str(error))
+            return
+        if self.controls.minimise_while_running:
+            self._minimise_for_run()
 
     @Slot()
     def pause_run(self) -> None:
@@ -654,6 +710,39 @@ class MainWindow(QMainWindow):
         self.dry_run_panel.show_view(dry_run_view(report, plan.target, delays))
         self._log("Dry run finished - no input was sent")
 
+    # -- getting out of the way --------------------------------------------
+    def _minimise_for_run(self) -> None:
+        """Step aside for the target, keeping the emergency stop on screen.
+
+        The window is minimised rather than merely lowered so it cannot cover
+        the target or take its focus back; the overlay keeps the stop control a
+        single click away, which is the reason minimising is safe at all.
+        """
+        self.stop_overlay.show_for_run("Starting...")
+        self._place_overlay()
+        self.showMinimized()
+        self._log("Window minimised for the run; the emergency stop stays on screen")
+
+    @Slot()
+    def restore_from_run(self) -> None:
+        """Bring the main window back and put the overlay away."""
+        self.stop_overlay.hide()
+        if self.isMinimized():
+            self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _place_overlay(self) -> None:
+        """Top-right of the screen the main window is on, clear of most targets."""
+        # Typed as Any: Qt's stubs promise a QScreen, but a widget without a
+        # window handle really can return None at runtime.
+        screen: Any = self.screen()
+        if screen is None:
+            return
+        area = screen.availableGeometry()
+        size = self.stop_overlay.size()
+        self.stop_overlay.move(area.right() - size.width() - 24, area.top() + 24)
+
     # -- events ------------------------------------------------------------
     @Slot(object)
     def _on_run_event(self, event: RunEvent) -> None:
@@ -672,9 +761,13 @@ class MainWindow(QMainWindow):
             self.controls.show_countdown("")
 
         self._set_state(next_state(self._state, event))
+        if self.stop_overlay.isVisible():
+            self.stop_overlay.show_state(controls_for(self._state).status_text)
 
         if isinstance(event, RunFinished):
             self.controls.show_countdown("")
+            if self.stop_overlay.isVisible() or self.isMinimized():
+                self.restore_from_run()
             report = self._service.last_report
             if report is not None:
                 self._log(friendly_error(report))
@@ -750,6 +843,7 @@ class MainWindow(QMainWindow):
             if callable(ignore):
                 ignore()
             return
+        self.stop_overlay.hide()
         if self._service.is_running:
             self._service.emergency_stop()
             self._service.join(2.0)

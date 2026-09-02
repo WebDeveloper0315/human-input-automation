@@ -3,11 +3,11 @@
 Cross-platform desktop automation for keyboard and mouse input, inspired by
 AutoIt. Windows, macOS and Ubuntu/Linux.
 
-**Status:** Phase 6 — real input, window activation, emergency stop and profile
-re-resolution are now **verified against a real X server**; three genuine bugs
-were found and fixed doing it. Windows, macOS and real desktop sessions remain
-unverified. See "Implemented, packaged, verified" below and
-`docs/PHASE6-REAL-PLATFORM-REPORT.md`.
+**Status:** Phase 7 — Linux/X11 is verified with real input. Windows and macOS
+are **not tested**: no such machine was available. A source-level audit of their
+adapter paths did find and fix three macOS defects, including a wrong permission
+attribution that would have sent users to the wrong settings pane. See
+`docs/PHASE7-WINDOWS-REPORT.md` and `docs/PHASE7-MACOS-REPORT.md`.
 
 ## What it does
 
@@ -78,13 +78,17 @@ three).
 ## Run
 
 ```bash
-python -m human_input_automation             # desktop UI (needs the gui extra)
-python -m human_input_automation --check     # short capability summary, headless
-python -m human_input_automation --diagnose  # full platform report, sends no input
-python -m human_input_automation --profiles  # list saved profiles
-python -m human_input_automation --validate-profile p.json   # validate, never run
-python -m human_input_automation --verbose   # add diagnostic logging
+human-input-automation             # desktop UI (needs the gui extra)
+human-input-automation --check     # short capability summary, headless
+human-input-automation --diagnose  # full platform report, sends no input
+human-input-automation --profiles  # list saved profiles
+human-input-automation --validate-profile p.json   # validate, never run
+human-input-automation --verbose   # add diagnostic logging
 ```
+
+The command uses hyphens; the module uses underscores. Both work:
+`human-input-automation` or `python -m human_input_automation` — but *not*
+`python -m human-input-automation`.
 
 `--diagnose` is the one to run when something does not work. It never sends
 keyboard or mouse input; it only inspects:
@@ -236,12 +240,16 @@ These are different claims, and the project keeps them apart:
 * **Verified** — real keyboard, mouse and window behaviour was executed and
   observed on that platform.
 
-| Platform | Package | Window control | Keyboard | Mouse | Global hotkey | Status |
-| --- | --- | --- | --- | --- | --- | --- |
-| Linux/X11 | AppImage | Verified | Verified | Verified | Verified | **Partially verified** — isolated X server, not a real desktop |
-| Linux/Wayland | AppImage | Restricted by OS | Restricted by OS | Restricted by OS | Unavailable by OS | **Restricted** — reported, not worked around |
-| Windows | Installer + zip (not built) | Implemented but unverified | Implemented but unverified | Implemented but unverified | Implemented but unverified | **Implemented but unverified** |
-| macOS | DMG (not built) | Implemented but unverified | Implemented but unverified | Implemented but unverified | Implemented but unverified | **Implemented but unverified** |
+| Platform | Real input | Activation | Mouse | Keyboard | Hotkey | Packaging | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Linux/X11 | Verified | Verified | Verified | Verified | Verified | Verified | **Pre-release** (isolated X server, not a full desktop) |
+| Linux/Wayland | Keyboard verified | Verified (XWayland apps) | **Unavailable by OS** | Verified (XWayland apps) | Unavailable by OS | Verified | **Partially verified** — keyboard yes, mouse no |
+| Windows | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Implemented but unverified** |
+| macOS | Not tested | Not tested | Not tested | Not tested | Not tested | Not tested | **Implemented but unverified** |
+
+Windows and macOS have never been executed — not the artifacts, not the
+adapters, not the permission flows. Their build jobs have never run. Treat those
+rows as "the code exists", nothing more.
 
 What "verified" covers on Linux/X11: typed text, named keys and a modifier chord
 arriving intact; mouse movement landing exactly and taking the requested time;
@@ -253,9 +261,22 @@ on every push by CI. The window manager was a minimal one written for the
 harness, so this is not yet evidence about GNOME, KDE or i3.
 
 No synthetic keyboard or mouse input has been executed on **any** platform.
-`docs/PHASE6-REAL-PLATFORM-REPORT.md` records exactly what was run and the three
-bugs it found; `docs/RELEASE-CHECKLIST.md` is the procedure for verifying a
-platform you do have.
+`docs/PHASE6-REAL-PLATFORM-REPORT.md` records exactly what was run on Linux and
+the three bugs it found; `docs/PHASE7-WINDOWS-REPORT.md` and
+`docs/PHASE7-MACOS-REPORT.md` record what is known about the other two and what
+must still be executed; `docs/RELEASE-CHECKLIST.md` is the procedure for
+verifying a platform you do have.
+
+**Have a Windows machine or a Mac?** The single most useful contribution is:
+
+```bash
+pip install -e ".[dev,desktop]"
+python tools/platform_verify/run_desktop_session.py --confirm
+```
+
+That runs ~51 checks — typing, activation against a decoy window, emergency
+stop, profile re-resolution — against its own target window, and writes a
+`report.json`.
 
 `docs/PHASE3-PLATFORM-REPORT.md` records exactly what was run, what was found
 (including two real library defects), and a manual checklist for verifying a
@@ -292,7 +313,7 @@ Behaviour on scaled displays (Windows 150%, macOS Retina) is unverified.
 ## Development
 
 ```bash
-pytest                                     # 698 tests with the gui extra, 591 without
+pytest                                     # 715 tests with the gui extra, 601 without
 pytest -m manual                           # host-dependent checks, opt-in
 ruff check .
 mypy src
@@ -303,6 +324,7 @@ python -m human_input_automation --profiles
 python -m human_input_automation --smoke-test   # starts the UI, stores a profile, no input
 python packaging/build.py                       # build and verify this platform's artifact
 tools/platform_verify/run_x11_session.sh /tmp/v python   # real-input verification (isolated X server)
+python tools/platform_verify/run_desktop_session.py --confirm  # same checks on this desktop
 ```
 
 Qt tests use the `offscreen` platform plugin (set automatically in
@@ -312,6 +334,9 @@ or OS permission.
 
 Tests that need a real desktop are marked (`manual`, `windows`, `macos`,
 `linux`, `x11`, `wayland`) and excluded from the default run.
+
+**New here? `docs/GUIDE.md` covers running, using, troubleshooting and
+deploying.**
 
 See `docs/ARCHITECTURE.md` for the layering, the Qt threading rule and the
 design decisions, `packaging/README.md` for how the packages are built,
