@@ -78,13 +78,17 @@ three).
 ## Run
 
 ```bash
-python -m human_input_automation             # desktop UI (needs the gui extra)
-python -m human_input_automation --check     # short capability summary, headless
-python -m human_input_automation --diagnose  # full platform report, sends no input
-python -m human_input_automation --profiles  # list saved profiles
-python -m human_input_automation --validate-profile p.json   # validate, never run
-python -m human_input_automation --verbose   # add diagnostic logging
+human-input-automation             # desktop UI (needs the gui extra)
+human-input-automation --check     # short capability summary, headless
+human-input-automation --diagnose  # full platform report, sends no input
+human-input-automation --profiles  # list saved profiles
+human-input-automation --validate-profile p.json   # validate, never run
+human-input-automation --verbose   # add diagnostic logging
 ```
+
+The command uses hyphens; the module uses underscores. Both work:
+`human-input-automation` or `python -m human_input_automation` — but *not*
+`python -m human-input-automation`.
 
 `--diagnose` is the one to run when something does not work. It never sends
 keyboard or mouse input; it only inspects:

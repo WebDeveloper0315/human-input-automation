@@ -11,9 +11,11 @@ than Windows and macOS do.
 
 from __future__ import annotations
 
+import importlib
 import os
 import sys
 from collections.abc import Mapping
+from typing import Any
 
 from ..core.capabilities import (
     Capability,
@@ -64,9 +66,6 @@ XWAYLAND_FOCUS_NOTE = (
     "verified on GNOME/Wayland, where the compositor honours activation requests "
     "for X11 windows"
 )
-
-_UNPROBED = "capabilities were not probed"
-
 
 def detect_platform(platform_id: str | None = None) -> PlatformName:
     """Map ``sys.platform`` onto :class:`PlatformName`."""
@@ -133,21 +132,50 @@ def macos_automation_trusted() -> bool | None:
     """
     if detect_platform() is not PlatformName.MACOS:
         return None
+
+    check = _load_automation_check()
+    if check is None:
+        return None
     try:
         from Foundation import NSAppleEventDescriptor
-        from ScriptingBridge import AEDeterminePermissionToAutomateTarget
     except Exception:
         return None
     try:  # 0 == noErr, i.e. permission already granted
         target = NSAppleEventDescriptor.descriptorWithBundleIdentifier_(
             "com.apple.systemevents"
         )
-        status = AEDeterminePermissionToAutomateTarget(
-            target.aeDesc(), b"****", b"****", False
-        )
-        return int(status) == 0
+        # askUserIfNeeded=False: this must never raise a prompt of its own.
+        return int(check(target.aeDesc(), b"****", b"****", False)) == 0
     except Exception:  # pragma: no cover - macOS only
         return None
+
+
+#: PyObjC does not agree across versions about which framework wrapper exports
+#: ``AEDeterminePermissionToAutomateTarget``, so try the plausible ones rather
+#: than guessing. Failing to find it means "unknown", never "denied".
+_AUTOMATION_CHECK_MODULES = ("CoreServices", "Foundation", "ScriptingBridge", "AppKit")
+
+
+def _pyobjc_available() -> bool:
+    """Whether the PyObjC bridge is importable at all."""
+    try:
+        importlib.import_module("objc")
+    except Exception:
+        return False
+    return True
+
+
+def _load_automation_check() -> Any | None:
+    """Locate ``AEDeterminePermissionToAutomateTarget`` in whichever wrapper has it."""
+    for module_name in _AUTOMATION_CHECK_MODULES:
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+        check = getattr(module, "AEDeterminePermissionToAutomateTarget", None)
+        if check is not None:
+            return check
+    return None
 
 
 def macos_input_monitoring_trusted() -> bool | None:
@@ -159,12 +187,16 @@ def macos_input_monitoring_trusted() -> bool | None:
     """
     if detect_platform() is not PlatformName.MACOS:
         return None
+    # CGPreflightListenEventAccess is the documented check for Input
+    # Monitoring and lives in CoreGraphics, which PyObjC wraps as Quartz.
+    # (IOHIDCheckAccess is IOKit, which PyObjC does not wrap - asking for it
+    # was why this always answered "unknown" on a Mac with PyObjC installed.)
     try:
-        from Quartz import IOHIDCheckAccess, kIOHIDRequestTypeListenEvent
+        from Quartz import CGPreflightListenEventAccess
     except Exception:
         return None
-    try:  # 0 == kIOHIDAccessTypeGranted
-        return int(IOHIDCheckAccess(kIOHIDRequestTypeListenEvent)) == 0
+    try:
+        return bool(CGPreflightListenEventAccess())
     except Exception:  # pragma: no cover - macOS only
         return None
 
@@ -228,6 +260,12 @@ def _macos_matrix(
     "grant permissions" cannot tell which pane to open.
     """
 
+    unknown_hint = (
+        "this build cannot query it"
+        if _pyobjc_available()
+        else "PyObjC is not installed, so it cannot be queried"
+    )
+
     def gated(name: CapabilityName, granted: bool | None, permission: str, what: str) -> Capability:
         if granted is True:
             return _capability(name, CapabilityState.AVAILABLE, f"{permission} granted")
@@ -242,8 +280,9 @@ def _macos_matrix(
         return _capability(
             name,
             CapabilityState.UNKNOWN,
-            f"{permission} could not be verified (install PyObjC for a definite answer); "
-            f"{what} may silently do nothing until it is granted",
+            f"{permission} has not been confirmed ({unknown_hint}); macOS will ask the "
+            f"first time it is needed, and until it is granted {what} silently does "
+            f"nothing. Grant it in {PERMISSION_LOCATIONS[permission]}",
             permission=permission,
             requires_restart=True,
         )
@@ -443,14 +482,19 @@ def describe_host(
 
     warnings: list[str] = []
     seen: set[str] = set()
+    seen_permissions: set[str] = set()
     for capability in matrix:
-        if capability.state in (CapabilityState.AVAILABLE,):
+        if capability.state is CapabilityState.AVAILABLE:
             continue
+        # One note per permission: four near-identical lines that differ only in
+        # which capability they gate is noise, not information.
+        if capability.permission:
+            if capability.permission in seen_permissions:
+                continue
+            seen_permissions.add(capability.permission)
         if capability.reason and capability.reason not in seen:
             seen.add(capability.reason)
             warnings.append(capability.reason)
-    if matrix.state(CapabilityName.WINDOW_ENUMERATION) is CapabilityState.UNKNOWN:
-        warnings.append(_UNPROBED)
 
     return PlatformReport(
         platform=platform,

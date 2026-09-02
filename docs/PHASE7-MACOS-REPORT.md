@@ -1,19 +1,75 @@
 # Phase 7 — macOS report
 
-## Status: NOT TESTED
+## Status: PARTIALLY TESTED — diagnostics only, no input
 
-**No Mac was available.** Nothing here is a test result. The findings below are
-*source-verified* — read from the installed libraries' own code — and they
-changed the product, but they are not evidence that macOS works.
+The application has now been **run on a real Mac** from a source checkout. Only
+the read-only commands were executed: `--check` and `--diagnose`. No automation
+has been run, no window has been activated, and no key or click has been sent.
 
 | | |
 | --- | --- |
-| macOS execution attempted | no |
+| macOS execution attempted | **yes** — `--check` and `--diagnose` |
 | Artifact built | no — the `build` job for `macos-14` has never run |
-| Artifact launched | no |
-| Real input executed | no |
+| Artifact launched | no — run from a source checkout |
+| Real input executed | **no** |
+| Window enumeration executed | **no** |
 | Signing | NOT PERFORMED — no Developer ID credentials |
 | Notarization | NOT PERFORMED — no credentials |
+
+### Environment actually used
+
+| | |
+| --- | --- |
+| OS | Darwin 25.4.0 (macOS 26.x) |
+| Machine | MacBook Pro |
+| Python | 3.13.15 (python.org framework build) |
+| Application | 0.8.1, source checkout, `pip install -e ".[dev,desktop]"` |
+| Display | Built-in Retina, 1792x1120 logical, single monitor |
+| Permissions at the time | Accessibility: granted (to the terminal). Automation and Input Monitoring: not confirmed |
+
+### Verified by that run
+
+* **Platform detection** — `macos / quartz`, window backend `pywinctl`. Correct.
+* **Data locations** — `~/Library/Application Support/human-input-automation/profiles`
+  and `~/Library/Logs/human-input-automation`. Correct macOS conventions.
+* **`Key.INSERT` is reported unavailable** on macOS. The Phase 3 source finding
+  is confirmed in behaviour: `Keys unavailable on this platform: insert`.
+* **Monitor detection works** — one display, 1792x1120, and the coordinate space
+  is reported as `logical`, which is right for Quartz event posting.
+* **The Accessibility probe answered definitively** (`available`), so
+  `AXIsProcessTrusted` via PyObjC works.
+* **Three separate permissions are reported**, not one — the Phase 7 model
+  survived contact with a real Mac.
+
+### Bugs this run exposed, and fixed
+
+1. **The Input Monitoring probe could never work.** It imported
+   `IOHIDCheckAccess` from `Quartz`; that symbol is IOKit, which PyObjC does not
+   wrap, so the import always failed and the answer was always "unknown" — even
+   with PyObjC installed. Now uses `CGPreflightListenEventAccess`, the
+   documented CoreGraphics call, which PyObjC does wrap.
+2. **"install PyObjC for a definite answer" was wrong.** PyObjC *was* installed
+   (pywinctl requires it on macOS). The message now distinguishes "PyObjC is
+   absent" from "this build cannot query it", and says macOS will prompt on
+   first use.
+3. **An unknown capability was printed as "no".** `--check` showed
+   `Verify focus: no` for a state that was `unknown` — precisely the confusion
+   the five-state model exists to prevent. The summary now prints each
+   capability's own state word.
+4. **A spurious "capabilities were not probed" note** appeared whenever a
+   permission was merely unconfirmed. Removed.
+5. **Four near-identical notes** for one permission, differing only in which
+   capability they gated. Now one note per permission.
+6. **The banner led with "multi monitor"** while two permissions were
+   unconfirmed. Unconfirmed permissions now outrank cosmetic limits.
+
+### Observed but not fixed
+
+* **Retina scale reported as `1x`** on a Built-in Retina Display, while the note
+  says Retina scales by 2. pymonctl computes the scale from display-mode
+  heights and returned 100. This is cosmetic *provided* Quartz input uses
+  logical points, which is what the coordinate space already claims — but it is
+  unverified, and a mouse test on that machine is the way to settle it.
 
 ## Environment to record when this is run
 

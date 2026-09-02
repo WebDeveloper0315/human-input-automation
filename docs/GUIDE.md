@@ -18,7 +18,27 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 pip install -e ".[dev,desktop]"    # everything, including real input
-python -m human_input_automation   # the desktop application
+
+human-input-automation             # the desktop application
+```
+
+**Note the two spellings.** The package installs as `human-input-automation`
+(hyphens) and that is also the command. The *module* name uses underscores, so
+if you prefer `python -m` it is:
+
+```bash
+python -m human_input_automation   # underscores, not hyphens
+```
+
+`python -m human-input-automation` fails with `No module named
+human-input-automation`; use the command above instead.
+
+On macOS, if the command is not found or Python reports the module missing,
+check you are on the virtual environment's interpreter:
+
+```bash
+which python && python -c "import sys; print(sys.prefix)"
+# both should point inside .venv; if not, run: hash -r && source .venv/bin/activate
 ```
 
 Extras, if you want less than everything:
@@ -38,7 +58,7 @@ Extras, if you want less than everything:
 Before anything else, ask the application what this computer allows:
 
 ```bash
-python -m human_input_automation --diagnose
+human-input-automation --diagnose
 ```
 
 It sends no input; it only inspects. Read the capability list before wondering

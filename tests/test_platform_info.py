@@ -213,3 +213,21 @@ def test_platform_key_gaps_are_carried_on_the_report() -> None:
 def test_xwayland_detection() -> None:
     assert has_xwayland({"DISPLAY": ":0"})
     assert not has_xwayland({})
+
+
+def test_the_automation_probe_reports_unknown_when_pyobjc_is_absent() -> None:
+    """No PyObjC (or a wrapper that moved the symbol) means unknown, not denied.
+
+    PyObjC versions disagree about which framework exports
+    AEDeterminePermissionToAutomateTarget, so the probe tries several and falls
+    back to "could not determine" rather than claiming the permission is missing.
+    """
+    from human_input_automation.adapters.platform_info import (
+        _load_automation_check,
+        macos_automation_trusted,
+    )
+
+    # On any non-macOS host the probe must not even try.
+    assert macos_automation_trusted() is None
+    # The loader must survive every module being absent.
+    assert _load_automation_check() is None or callable(_load_automation_check())

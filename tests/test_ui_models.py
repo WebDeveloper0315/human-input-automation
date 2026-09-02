@@ -208,15 +208,44 @@ def test_banner_includes_hotkey_reason() -> None:
 
 
 def test_status_text_is_qt_free_and_lists_capabilities() -> None:
+    """The summary prints each capability's own state word, never yes/no.
+
+    Regression: a macOS run showed "Verify focus: no" for a capability whose
+    state was *unknown* - exactly the confusion the five-state model exists to
+    prevent.
+    """
+    from human_input_automation.adapters.platform_info import describe_host
+
     text = host_status_text(
-        host(PlatformName.LINUX, DisplayServer.WAYLAND, WindowCapabilities()),
+        describe_host(PlatformName.LINUX, DisplayServer.WAYLAND, env={}),
         problems=("adapter missing",),
         hotkey=HotkeySupport(None, "unknown"),
     )
     assert "Platform: linux (wayland)" in text
-    assert "Enumerate windows: no" in text
+    assert "Enumerate windows: unavailable" in text
     assert "Adapter: adapter missing" in text
     assert "Emergency hotkey: unknown" in text
+    assert ": no" not in text, "a state must never be rendered as a bare no"
+
+
+def test_an_unverified_permission_is_never_shown_as_no() -> None:
+    """macOS with nothing confirmed yet: every gated line must say 'unknown'."""
+    from human_input_automation.adapters.platform_info import describe_host
+
+    text = host_status_text(
+        describe_host(
+            PlatformName.MACOS,
+            DisplayServer.QUARTZ,
+            env={},
+            accessibility_trusted=True,
+            input_monitoring_trusted=None,
+            automation_trusted=None,
+        )
+    )
+    assert "Send input: available" in text
+    assert "Verify focus: unknown" in text
+    assert "Activate windows: unknown" in text
+    assert ": no" not in text
 
 
 # -- target presentation --------------------------------------------------
