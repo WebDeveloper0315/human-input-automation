@@ -10,6 +10,7 @@ What it does:
 * shows a text field, a button and a status area
 * records every key and mouse event it receives, with timestamps
 * appends those events to a JSON-lines file so a harness can assert on them
+* writes down the contents of its text field when F8 is pressed
 
 What it deliberately cannot do: run commands, read or write files other than
 its own event log, open network connections, change any system setting, or
@@ -138,6 +139,12 @@ def build_window(recorder: EventRecorder, title: str) -> Any:
                     modifiers=int(event.modifiers().value),
                 )
                 self.window.note("key_press")
+                if event.key() == int(Qt.Key.Key_F8):
+                    # A harness cannot read another process's widget. F8 asks
+                    # the target to write down what its editor actually holds,
+                    # which is how "did the text arrive intact?" is answered
+                    # for a whole block rather than key by key.
+                    recorder.record("content", text=self.window.editor.toPlainText())
             elif kind == QEvent.Type.KeyRelease:
                 recorder.record("key_release", key=int(event.key()))
                 self.window.note("key_release")

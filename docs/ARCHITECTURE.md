@@ -35,9 +35,10 @@ same name and confuses packaging and analysis tools.
 | --- | --- |
 | `core/actions.py` | Action dataclasses (the discriminated union) |
 | `core/keys.py` | Platform-neutral key names, aliases, shortcut parsing |
-| `core/plan.py` | `AutomationPlan`, `ExecutionLimits`, `RunOptions` |
+| `core/plan.py` | `AutomationPlan`, `ExecutionLimits`, `RunOptions`, `TypingStyle` |
 | `core/target.py` | `TargetWindow`, `WindowCapabilities`, `PlatformReport` |
 | `core/timing.py` | `TimingProfile`, `TimingService` |
+| `core/typing_style.py` | `TypingStyle` and the keystroke plan behind mistyping |
 | `core/validation.py` | Plan/action/target validation, errors vs warnings |
 | `core/control.py` | `RunControl`: start/pause/resume/stop/emergency stop |
 | `core/engine.py` | `AutomationEngine`, `ExecutionContext`, `ActionRegistry` |

@@ -6,6 +6,7 @@ library; everything it needs arrives through ``human_input_automation.ports``.
 
 from .actions import (
     Action,
+    IndentMode,
     KeyDown,
     KeyPress,
     KeyUp,
@@ -14,6 +15,8 @@ from .actions import (
     MouseMove,
     MouseUp,
     Shortcut,
+    TextAction,
+    TypeCode,
     TypeText,
     Wait,
 )
@@ -40,6 +43,7 @@ from .target import (
     WindowCapabilities,
 )
 from .timing import TimingProfile, TimingService
+from .typing_style import TypingStyle
 from .validation import validate_plan
 
 __all__ = [
@@ -52,6 +56,7 @@ __all__ = [
     "DisplayServer",
     "ExecutionContext",
     "ExecutionLimits",
+    "IndentMode",
     "Key",
     "KeyDown",
     "KeyPress",
@@ -73,9 +78,12 @@ __all__ = [
     "Shortcut",
     "TargetActivationError",
     "TargetWindow",
+    "TextAction",
     "TimingProfile",
     "TimingService",
+    "TypeCode",
     "TypeText",
+    "TypingStyle",
     "UnsupportedActionError",
     "ValidationError",
     "ValidationIssue",

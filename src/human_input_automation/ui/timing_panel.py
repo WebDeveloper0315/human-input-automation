@@ -21,12 +21,16 @@ from PySide6.QtWidgets import (
 
 from ..core.errors import ValidationError
 from ..core.timing import TimingProfile
+from ..core.typing_style import TypingStyle
 from .models import (
+    DEFAULT_TYPO_PERCENT,
     TIMING_FIELDS,
     build_timing_profile,
     format_preview,
     preview_delays,
     timing_to_values,
+    typing_style_to_values,
+    typing_style_with_rate,
 )
 
 PREVIEW_COUNT = 5
@@ -45,6 +49,10 @@ class TimingPanel(QGroupBox):
         super().__init__("Timing")
         self._spins: dict[str, QDoubleSpinBox] = {}
         self._error = ""
+        # The pauses around a correction are part of the profile but not of this
+        # panel; keeping the loaded style means the two controls below cannot
+        # quietly flatten values someone set by hand in the file.
+        self._typing_style = TypingStyle()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -96,6 +104,33 @@ class TimingPanel(QGroupBox):
         seed_widget = QWidget()
         seed_widget.setLayout(seed_row)
 
+        self.mistakes_check = QCheckBox("Mistype and correct, the way a person does")
+        self.mistakes_check.setAccessibleName("Type with mistakes")
+        self.mistakes_check.setToolTip(
+            "Occasionally hits a neighbouring key, pauses, and takes it back with "
+            "backspace before carrying on. The text that ends up in the target is "
+            "still exactly the text in the plan."
+        )
+        self.mistakes_check.toggled.connect(self._on_mistakes_toggled)
+
+        self.mistakes_spin = QDoubleSpinBox()
+        self.mistakes_spin.setRange(0.1, 100.0)
+        self.mistakes_spin.setDecimals(1)
+        self.mistakes_spin.setSingleStep(0.5)
+        self.mistakes_spin.setSuffix(" % of letters")
+        self.mistakes_spin.setValue(DEFAULT_TYPO_PERCENT)
+        self.mistakes_spin.setEnabled(False)
+        self.mistakes_spin.setAccessibleName("Mistake rate")
+        self.mistakes_spin.valueChanged.connect(self._on_changed)
+
+        mistakes_row = QHBoxLayout()
+        mistakes_row.setContentsMargins(0, 0, 0, 0)
+        mistakes_row.addWidget(self.mistakes_check)
+        mistakes_row.addWidget(self.mistakes_spin)
+        mistakes_row.addStretch(1)
+        mistakes_widget = QWidget()
+        mistakes_widget.setLayout(mistakes_row)
+
         self.error_label = QLabel()
         self.error_label.setWordWrap(True)
         self.error_label.setVisible(False)
@@ -115,6 +150,7 @@ class TimingPanel(QGroupBox):
 
         layout.addLayout(form)
         layout.addWidget(seed_widget)
+        layout.addWidget(mistakes_widget)
         layout.addWidget(self.error_label)
         layout.addLayout(preview_row)
         layout.addStretch(1)
@@ -144,6 +180,21 @@ class TimingPanel(QGroupBox):
             if spin is not None:
                 spin.setValue(float(value))
 
+    def typing_style(self) -> TypingStyle:
+        """The style the plan should run with."""
+        return typing_style_with_rate(
+            self._typing_style,
+            enabled=self.mistakes_check.isChecked(),
+            percent=float(self.mistakes_spin.value()),
+        )
+
+    def set_typing_style(self, style: TypingStyle) -> None:
+        """Show a loaded style, keeping the parts this panel does not edit."""
+        self._typing_style = style
+        values = typing_style_to_values(style)
+        self.mistakes_check.setChecked(bool(values["enabled"]))
+        self.mistakes_spin.setValue(float(values["percent"]))
+
     def profile(self) -> TimingProfile | None:
         """The current profile, or ``None`` when the inputs are invalid."""
         try:
@@ -159,6 +210,8 @@ class TimingPanel(QGroupBox):
             spin.setEnabled(not locked)
         self.seed_check.setEnabled(not locked)
         self.seed_spin.setEnabled(not locked and self.seed_check.isChecked())
+        self.mistakes_check.setEnabled(not locked)
+        self.mistakes_spin.setEnabled(not locked and self.mistakes_check.isChecked())
         self.preview_button.setEnabled(not locked)
 
     def refresh_preview(self) -> None:
@@ -171,6 +224,10 @@ class TimingPanel(QGroupBox):
         self.preview_label.setText(f"Next delays: {format_preview(delays)}")
 
     # -- internals ---------------------------------------------------------
+    def _on_mistakes_toggled(self, checked: bool) -> None:
+        self.mistakes_spin.setEnabled(checked)
+        self._on_changed()
+
     def _on_seed_toggled(self, checked: bool) -> None:
         self.seed_spin.setEnabled(checked)
         self._on_changed()

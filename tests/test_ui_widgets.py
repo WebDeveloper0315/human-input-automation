@@ -274,6 +274,33 @@ def test_action_dialog_delay_defaults_to_the_timing_profile() -> None:
     assert action is not None and action.delay_after_ms is None
 
 
+def test_action_dialog_edits_a_code_typing_action() -> None:
+    from human_input_automation.core.actions import IndentMode, TypeCode
+    from human_input_automation.ui.models import INDENT_LABELS
+
+    dialog = ActionDialog(kind="type_code")
+    assert set(dialog.values()) == {
+        "text", "indent", "drop_auto_pairs", "dismiss_suggestions", "line_start_chord"
+    }
+    dialog.set_values(
+        {
+            "text": "if (x) {\n    y();\n}",
+            "indent": INDENT_LABELS[IndentMode.EDITOR],
+            "drop_auto_pairs": False,
+            "dismiss_suggestions": True,
+            "line_start_chord": "meta+shift+left",
+        }
+    )
+    action = dialog.try_build()
+    assert action == TypeCode(
+        text="if (x) {\n    y();\n}",
+        indent=IndentMode.EDITOR,
+        drop_auto_pairs=False,
+        line_start_chord="meta+shift+left",
+    )
+    assert ActionDialog(action=action).try_build() == action
+
+
 def test_action_dialog_switches_fields_when_the_kind_changes() -> None:
     dialog = ActionDialog(kind="type_text")
     index = dialog.kind_combo.findData("mouse_click")
@@ -332,6 +359,43 @@ def test_timing_panel_locks_during_a_run() -> None:
     assert not panel.preview_button.isEnabled()
     panel.set_locked(False)
     assert panel.preview_button.isEnabled()
+
+
+def test_timing_panel_types_exactly_until_mistakes_are_switched_on() -> None:
+    panel = TimingPanel()
+    assert panel.typing_style().is_exact
+    assert not panel.mistakes_spin.isEnabled()
+
+    panel.mistakes_check.setChecked(True)
+    panel.mistakes_spin.setValue(4.0)
+    assert panel.mistakes_spin.isEnabled()
+    style = panel.typing_style()
+    assert style.typo_rate == pytest.approx(0.04)
+    assert not style.is_exact
+
+
+def test_timing_panel_round_trips_a_typing_style() -> None:
+    from human_input_automation.core.typing_style import TypingStyle
+
+    panel = TimingPanel()
+    panel.set_typing_style(TypingStyle.natural(typo_rate=0.07))
+    assert panel.mistakes_check.isChecked()
+    assert panel.typing_style().typo_rate == pytest.approx(0.07)
+
+    panel.set_typing_style(TypingStyle())
+    assert not panel.mistakes_check.isChecked()
+    assert panel.typing_style().is_exact
+
+
+def test_timing_panel_locks_the_mistake_controls_during_a_run() -> None:
+    panel = TimingPanel()
+    panel.mistakes_check.setChecked(True)
+    panel.set_locked(True)
+    assert not panel.mistakes_check.isEnabled()
+    assert not panel.mistakes_spin.isEnabled()
+    panel.set_locked(False)
+    assert panel.mistakes_check.isEnabled()
+    assert panel.mistakes_spin.isEnabled()
 
 
 def test_timing_panel_round_trips_a_profile() -> None:

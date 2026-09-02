@@ -9,6 +9,7 @@ import pytest
 
 from human_input_automation.adapters.hotkeys import HotkeySupport
 from human_input_automation.core.actions import (
+    IndentMode,
     KeyPress,
     MouseClick,
     MouseMove,
@@ -39,8 +40,11 @@ from human_input_automation.core.target import (
     WindowCapabilities,
 )
 from human_input_automation.core.timing import TimingProfile
+from human_input_automation.core.typing_style import TypingStyle
 from human_input_automation.ui.models import (
     ACTION_SPECS,
+    DEFAULT_TYPO_PERCENT,
+    INDENT_LABELS,
     CapabilityLevel,
     TargetRow,
     UiState,
@@ -60,6 +64,8 @@ from human_input_automation.ui.models import (
     preview_delays,
     spec_for_action,
     timing_to_values,
+    typing_style_to_values,
+    typing_style_with_rate,
 )
 
 from .fakes import make_target
@@ -264,6 +270,13 @@ def test_active_target_text_states_when_nothing_is_selected() -> None:
 def test_every_action_spec_round_trips_through_the_form() -> None:
     samples: dict[str, dict[str, Any]] = {
         "type_text": {"text": "hello"},
+        "type_code": {
+            "text": "def f():\n    pass",
+            "indent": INDENT_LABELS[IndentMode.EDITOR],
+            "drop_auto_pairs": False,
+            "dismiss_suggestions": True,
+            "line_start_chord": "meta+shift+left",
+        },
         "key_press": {"key": "enter", "count": 2},
         "key_down": {"key": "shift"},
         "key_up": {"key": "shift"},
@@ -459,3 +472,34 @@ def test_dry_run_view_lists_actions_duration_and_warnings() -> None:
     assert view.lines[0].startswith("1. type 'hi'")
     assert any("Sample character delays" in line for line in view.lines)
     assert view.warnings == ("no explicit target",)
+
+
+# -- typing style form ----------------------------------------------------
+def test_switching_mistakes_off_and_on_keeps_the_pauses_from_the_file() -> None:
+    """The panel edits two values; a hand-edited profile may carry more."""
+    saved = TypingStyle(typo_rate=0.1, notice_pause_ms=999.0, correction_pause_ms=5.0)
+
+    off = typing_style_with_rate(saved, enabled=False, percent=10.0)
+    assert off.is_exact
+    assert off.notice_pause_ms == 999.0
+
+    back_on = typing_style_with_rate(off, enabled=True, percent=10.0)
+    assert back_on.typo_rate == pytest.approx(0.1)
+    assert back_on.notice_pause_ms == 999.0
+    assert back_on.hesitation_rate > 0
+
+
+def test_typing_style_values_offer_a_starting_rate_when_there_is_none() -> None:
+    assert typing_style_to_values(TypingStyle()) == {
+        "enabled": False,
+        "percent": DEFAULT_TYPO_PERCENT,
+    }
+    assert typing_style_to_values(TypingStyle.natural(typo_rate=0.05)) == {
+        "enabled": True,
+        "percent": 5.0,
+    }
+
+
+def test_a_rate_outside_the_panel_range_is_clamped_not_rejected() -> None:
+    assert typing_style_with_rate(TypingStyle(), enabled=True, percent=500.0).typo_rate == 1.0
+    assert typing_style_with_rate(TypingStyle(), enabled=True, percent=-5.0).typo_rate == 0.0

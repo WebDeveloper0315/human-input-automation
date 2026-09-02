@@ -70,6 +70,25 @@ Every line below was executed and observed.
 * `ctrl+a` arrived **with the modifier applied** (`Key_A` with `ControlModifier`),
   not as two separate keystrokes.
 
+### Typing into an editor, and typing with mistakes
+Added with the editor-aware typing work; both lines below were executed against
+the isolated X server, 2026-09-02.
+
+* A six-line code block sent with `type_code` arrived **byte for byte** in the
+  target's text box, including its indentation and brackets. The compensating
+  keystrokes (Escape at each line end, Delete for the brackets an editor would
+  have closed, `shift+home` to reclaim the indentation) were confirmed present
+  in the target's own event log, and changed nothing in a text box that does
+  none of those things.
+* With mistakes enabled at 25%, the target recorded **32 backspaces** during the
+  run and still ended holding exactly the requested sentence.
+
+What this does **not** show: that the compensations cancel out VS Code's own
+behaviour. The target is a plain `QPlainTextEdit`; it does not auto-indent,
+close brackets or complete words. That claim rests on the editor model in
+`tests/test_editor_typing.py` and has to be confirmed by typing into the real
+editor.
+
 ### Mouse
 * Absolute movement landed exactly: asked (600, 400), ended (600, 400).
 * Duration honoured: asked 400 ms, measured 401 ms — movement is interpolated,
@@ -200,6 +219,10 @@ fake-based suite, and each now has regression tests.
 * **Wayland**: capability reporting and read-only enumeration were exercised;
   no input was ever injected into the live session.
 * **Non-US keyboard layouts** — untested on every platform.
+* **A real code editor.** `type_code` has been verified against a model of one
+  (auto-indent, auto-closing brackets, completion) and against a plain text box
+  on a real X server. It has never been run against VS Code, or any other
+  editor, on any platform.
 * **Display scaling** other than 100%; macOS Retina point-vs-pixel behaviour.
 * **Windows display scaling** and per-monitor DPI.
 * macOS Accessibility / Input Monitoring: the model is implemented and unit

@@ -88,8 +88,9 @@ Verify the download first: `sha256sum -c SHA256SUMS`.
 2. **Pick a target.** *Refresh windows*, then click the window you want to
    automate. The bold line underneath always shows the current target. There is
    no "just use whatever is focused" mode — that is deliberate.
-3. **Build the plan.** *Add* actions: type text, key presses, shortcuts, mouse
-   moves and clicks, waits. Each action can override the delay that follows it.
+3. **Build the plan.** *Add* actions: type text, type into a code editor, key
+   presses, shortcuts, mouse moves and clicks, waits. Each action can override
+   the delay that follows it.
 4. **Set the timing.** Base delay and jitter, plus word and punctuation pauses.
    The preview shows the delays your settings actually produce. Tick *Use fixed
    seed* to make a run reproducible.
@@ -104,6 +105,62 @@ Verify the download first: `sha256sum -c SHA256SUMS`.
    the overlay, or with `Ctrl+.`. Where the platform allows it, `Ctrl+Shift+F9`
    works as a global hotkey even when the application is not focused. Stopping
    is immediate and always releases any keys or mouse buttons being held.
+
+### Typing into a code editor
+
+A code editor is not a text box. It indents each new line for you, closes
+brackets you open, and offers completions that Enter accepts. *Type text* sends
+your code straight through all of that, which is how a tidy function turns into
+a staircase with spare braces at the bottom:
+
+```js
+function test() {
+        if (typeof window !== "undefined") {
+                    console.log("Test function called");
+                            return true;
+                                }
+                                    return false;
+                                    }
+        }
+}
+```
+
+Use **Type into a code editor** instead. It sends the same text one line at a
+time and undoes each of those behaviours as it goes:
+
+| Setting | What it does | When to turn it off |
+| --- | --- | --- |
+| *Indentation: replace what the editor indents* | Selects the indentation the editor just inserted and types over it, so the code arrives exactly as written. | Choose *let the editor indent it* if you would rather have the editor's own layout, or *type as written* for an editor that does nothing on Enter. |
+| *Delete brackets the editor closes* | After a line that leaves a bracket open, presses Delete once per open bracket to remove the partner the editor added. | **Turn this off for an editor that does not close brackets** — the Delete would take a real character instead. |
+| *Press Escape before each new line* | Closes the completion popup, so Enter starts a new line instead of accepting a suggestion. | If you drive an editor where Escape does something else (Vim mode, for instance). |
+| *Select to line start with* | The chord used to select the editor's indentation. `shift+home` works in VS Code everywhere; `meta+shift+left` is the native macOS one. | — |
+
+None of this can ask the editor what it is about to do; each setting is a
+keystroke that assumes a behaviour. The defaults match VS Code. Run a **dry
+run** and then a real one into a scratch file the first time you point it at a
+new editor.
+
+Two known limits: a blank line keeps whatever indentation the editor gave it,
+and a line that ends inside an unterminated string can leave one bracket behind.
+Both leave characters in the file rather than removing yours.
+
+### Typing with mistakes
+
+By default the application types perfectly. Tick *Mistype and correct, the way a
+person does* in the Timing panel to make it type the way people actually do:
+occasionally hitting a neighbouring key, pausing, and taking it back with
+backspace before carrying on. The rate is a percentage of the letters typed;
+2-4% looks natural.
+
+The text that ends up in the target is still exactly the text in your plan — a
+mistake is always a detour, never a change. Mistakes are only ever made on
+letters, so brackets and quotes are never affected, and a correction never
+reaches back across a line break.
+
+This is for demonstrations, screen recordings, and for exercising an
+application's own editing and undo handling. It is not a way to make automation
+look human to a detection system and does not make synthetic input any less
+synthetic; the operating system still reports it as generated.
 
 ### Profiles
 

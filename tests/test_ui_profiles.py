@@ -128,6 +128,25 @@ def test_saving_persists_timing_and_seed(harness: Any) -> None:
     assert stored.plan.options.seed == 4242
 
 
+def test_saving_persists_the_typing_style(harness: Any) -> None:
+    app = harness()
+    app.compose()
+    app.window.timing_panel.mistakes_check.setChecked(True)
+    app.window.timing_panel.mistakes_spin.setValue(6.0)
+    app.window.save_profile_as("Human")
+
+    stored = app.profiles.load(app.window.profile.id)
+    assert stored.plan is not None
+    assert stored.plan.typing.typo_rate == pytest.approx(0.06)
+
+    app.window.new_profile()
+    assert app.window.timing_panel.typing_style().is_exact
+
+    app.window.load_profile(stored.id)
+    assert app.window.timing_panel.mistakes_check.isChecked()
+    assert app.window.timing_panel.typing_style().typo_rate == pytest.approx(0.06)
+
+
 def test_loading_restores_actions_timing_and_seed(harness: Any) -> None:
     app = harness()
     app.compose(TypeText(text="restored"), Wait(duration_ms=250))

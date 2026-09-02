@@ -56,6 +56,12 @@ interrupted save leaves the previous version intact — never a truncated file.
   "plan": {
     "actions": [
       { "type": "type_text", "delay_after_ms": null, "text": "Hello, world." },
+      {
+        "type": "type_code", "delay_after_ms": null,
+        "text": "function test() {\n    return true;\n}",
+        "indent": "reclaim", "drop_auto_pairs": true,
+        "dismiss_suggestions": true, "line_start_chord": "shift+home"
+      },
       { "type": "key_press", "delay_after_ms": null, "key": "enter", "count": 1 }
     ],
     "timing": {
@@ -66,6 +72,12 @@ interrupted save leaves the previous version intact — never a truncated file.
       "punctuation_chars": ".,;:!?",
       "action_delay_ms": 120.0, "action_jitter_ms": 40.0,
       "mouse_move_duration_ms": 200.0, "mouse_move_jitter_ms": 50.0
+    },
+    "typing": {
+      "typo_rate": 0.0, "typo_notice_chars": 2,
+      "notice_pause_ms": 220.0, "notice_pause_jitter_ms": 140.0,
+      "correction_pause_ms": 90.0, "correction_pause_jitter_ms": 45.0,
+      "hesitation_rate": 0.0, "hesitation_ms": 450.0, "hesitation_jitter_ms": 250.0
     },
     "limits": {
       "max_actions": 500, "max_text_length": 5000,
@@ -98,8 +110,8 @@ from which fields are present.
 `"type"` is the action's `kind`, the same identifier the engine dispatches on,
 so the stored format cannot drift from the domain model. Supported types:
 
-`type_text`, `key_press`, `key_down`, `key_up`, `shortcut`, `mouse_move`,
-`mouse_click`, `mouse_down`, `mouse_up`, `wait`
+`type_text`, `type_code`, `key_press`, `key_down`, `key_up`, `shortcut`,
+`mouse_move`, `mouse_click`, `mouse_down`, `mouse_up`, `wait`
 
 Every action also carries `delay_after_ms` (`null` = use the timing profile).
 Keys are written by name (`"enter"`, `"ctrl"`, `"a"`); `"meta"` is the platform
@@ -109,6 +121,48 @@ Encoding is generic over each action's dataclass fields, so a field added to an
 action in future is written out automatically instead of silently disappearing
 from saved profiles — a test asserts the encoded keys match the declared fields
 for every action type.
+
+### `type_code`
+
+Types text into an editor that edits while you type. Same text as `type_text`,
+sent one line at a time with the editor's own helpfulness compensated for.
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `indent` | `"reclaim"` (default), `"editor"`, `"off"` | `reclaim` selects the indentation the editor inserted and types over it, so the text arrives exactly as written. `editor` drops our leading whitespace and keeps the editor's. `off` sends the text unchanged. |
+| `drop_auto_pairs` | `true` (default) / `false` | After a line that leaves a bracket open, press Delete once per open bracket to remove the partner the editor added. Assumes the editor closes brackets; in one that does not, those presses delete real text. |
+| `dismiss_suggestions` | `true` (default) / `false` | Press Escape at the end of each line so Enter starts a new line instead of accepting a completion. |
+| `line_start_chord` | `"shift+home"` (default), any chord | How to select to the start of the line for `reclaim`. `meta+shift+left` is the native macOS equivalent. |
+
+Which brackets are outstanding is counted from the line itself, skipping
+anything inside a string or after `//` or `#`. An unterminated quote stops the
+count early, which leaves a bracket behind rather than deleting a character the
+user typed.
+
+## Typing style
+
+`plan.typing` decides how faithfully text is typed. The default types exactly:
+every character once, in order.
+
+| Field | Meaning |
+| --- | --- |
+| `typo_rate` | Probability (0-1) that a letter is mistyped. `0` disables mistakes. |
+| `typo_notice_chars` | How many further characters may be typed before the mistake is noticed (0-8). |
+| `notice_pause_ms`, `notice_pause_jitter_ms` | Pause between making a mistake and correcting it. |
+| `correction_pause_ms`, `correction_pause_jitter_ms` | Pause after each backspace. |
+| `hesitation_rate`, `hesitation_ms`, `hesitation_jitter_ms` | Probability and length of a longer pause before a character. |
+
+A mistake is always a detour, never a change: every slip is followed by exactly
+enough backspaces to remove it, mistakes are only ever made on letters, and a
+correction never reaches back across a newline. What ends up in the target is
+the text in the plan.
+
+This exists for demonstrations, screen recordings and for exercising an
+application's editing paths. It is not a way to make automation look human to a
+detection system, and must not be described or used as one.
+
+A profile written before this section existed simply has no `"typing"` key and
+loads with the exact-typing default.
 
 ## Target identity
 

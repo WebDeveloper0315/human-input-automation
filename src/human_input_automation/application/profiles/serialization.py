@@ -30,6 +30,7 @@ from typing import Any
 
 from ...core.actions import (
     Action,
+    IndentMode,
     KeyDown,
     KeyPress,
     KeyUp,
@@ -38,6 +39,7 @@ from ...core.actions import (
     MouseMove,
     MouseUp,
     Shortcut,
+    TypeCode,
     TypeText,
     Wait,
 )
@@ -46,6 +48,7 @@ from ...core.keys import Key, KeyLike, MouseButton, normalize_key
 from ...core.plan import AutomationPlan, ExecutionLimits, RunOptions
 from ...core.target import DisplayServer, PlatformName, TargetWindow, WindowCapabilities
 from ...core.timing import TimingProfile
+from ...core.typing_style import TypingStyle
 from .schema import (
     SCHEMA_VERSION,
     SUPPORTED_SCHEMA_VERSIONS,
@@ -174,7 +177,7 @@ def _key(value: Any, location: str) -> KeyLike:
 
 
 def _encode_value(value: Any, location: str) -> Any:
-    if isinstance(value, (Key, MouseButton)):
+    if isinstance(value, (Key, MouseButton, IndentMode)):
         return value.value
     if isinstance(value, (str, bool, int, float)) or value is None:
         if isinstance(value, float) and not math.isfinite(value):
@@ -199,6 +202,24 @@ def action_to_dict(action: Action) -> dict[str, Any]:
 
 def _decode_type_text(data: Mapping[str, Any], location: str, delay: float | None) -> Action:
     return TypeText(text=_string(data, "text", location), delay_after_ms=delay)
+
+
+def _decode_type_code(data: Mapping[str, Any], location: str, delay: float | None) -> Action:
+    defaults = TypeCode(text=" ")
+    return TypeCode(
+        text=_string(data, "text", location),
+        indent=_enum(IndentMode, data.get("indent"), "indent", location, defaults.indent),
+        drop_auto_pairs=_bool(
+            data, "drop_auto_pairs", location, default=defaults.drop_auto_pairs
+        ),
+        dismiss_suggestions=_bool(
+            data, "dismiss_suggestions", location, default=defaults.dismiss_suggestions
+        ),
+        line_start_chord=_string(
+            data, "line_start_chord", location, default=defaults.line_start_chord
+        ),
+        delay_after_ms=delay,
+    )
 
 
 def _decode_key_press(data: Mapping[str, Any], location: str, delay: float | None) -> Action:
@@ -268,6 +289,7 @@ ActionDecoder = Callable[[Mapping[str, Any], str, "float | None"], Action]
 #: ``kind``, so the stored format and the domain model cannot drift apart.
 ACTION_DECODERS: dict[str, tuple[type[Action], ActionDecoder]] = {
     TypeText.kind: (TypeText, _decode_type_text),
+    TypeCode.kind: (TypeCode, _decode_type_code),
     KeyPress.kind: (KeyPress, _decode_key_press),
     KeyDown.kind: (KeyDown, _decode_key_down),
     KeyUp.kind: (KeyUp, _decode_key_up),
@@ -328,6 +350,30 @@ def timing_from_dict(data: Any, location: str = "plan.timing") -> TimingProfile:
                 mapping, "punctuation_chars", location, default=defaults.punctuation_chars
             ),
             **numbers,
+        )
+    except ValidationError as error:
+        raise _fail("; ".join(issue.message for issue in error.issues), location) from None
+
+
+def typing_to_dict(style: TypingStyle) -> dict[str, Any]:
+    return {field.name: getattr(style, field.name) for field in dataclasses.fields(style)}
+
+
+def typing_from_dict(data: Any, location: str = "plan.typing") -> TypingStyle:
+    mapping = _mapping(data, location)
+    defaults = TypingStyle()
+    allowed = {field.name for field in dataclasses.fields(TypingStyle)}
+    _reject_unknown(mapping, allowed, location)
+    try:
+        return TypingStyle(
+            typo_notice_chars=_int(
+                mapping, "typo_notice_chars", location, default=defaults.typo_notice_chars
+            ),
+            **{
+                name: _float(mapping, name, location, default=getattr(defaults, name))
+                for name in allowed
+                if name != "typo_notice_chars"
+            },
         )
     except ValidationError as error:
         raise _fail("; ".join(issue.message for issue in error.issues), location) from None
@@ -455,6 +501,7 @@ def plan_to_dict(plan: AutomationPlan) -> dict[str, Any]:
     return {
         "actions": [action_to_dict(action) for action in plan.actions],
         "timing": timing_to_dict(plan.timing),
+        "typing": typing_to_dict(plan.typing),
         "limits": limits_to_dict(plan.limits),
         "options": options_to_dict(plan.options),
     }
@@ -479,7 +526,7 @@ def plan_from_dict(
     a resolved target cannot pass :func:`validate_plan` and therefore cannot run.
     """
     mapping = _mapping(data, location)
-    _reject_unknown(mapping, {"actions", "timing", "limits", "options"}, location)
+    _reject_unknown(mapping, {"actions", "timing", "typing", "limits", "options"}, location)
 
     raw_actions = mapping.get("actions")
     if not isinstance(raw_actions, list):
@@ -492,6 +539,7 @@ def plan_from_dict(
         target=target or _placeholder_target(),
         actions=actions,
         timing=timing_from_dict(mapping.get("timing", {}), f"{location}.timing"),
+        typing=typing_from_dict(mapping.get("typing", {}), f"{location}.typing"),
         limits=limits_from_dict(mapping.get("limits", {}), f"{location}.limits"),
         options=options_from_dict(mapping.get("options", {}), f"{location}.options"),
     )
@@ -557,6 +605,7 @@ def profile_to_dict(profile: Profile) -> dict[str, Any]:
         "plan": plan_to_dict(plan) if plan is not None else {
             "actions": [],
             "timing": timing_to_dict(TimingProfile()),
+            "typing": typing_to_dict(TypingStyle()),
             "limits": limits_to_dict(ExecutionLimits()),
             "options": options_to_dict(RunOptions()),
         },
