@@ -70,16 +70,15 @@ def main(argv: list[str] | None = None) -> int:
     processes: list[subprocess.Popen[bytes]] = []
     try:
         print("\n== target window")
-        processes.append(
-            start(
-                arguments.python,
-                "target_app.py",
-                "--events", str(workdir / "target.jsonl"),
-                "--geometry", "40,40,800,600",
-                "--seconds", str(arguments.seconds),
-                log=workdir / "target.log",
-            )
+        target = start(
+            arguments.python,
+            "target_app.py",
+            "--events", str(workdir / "target.jsonl"),
+            "--geometry", "40,40,800,600",
+            "--seconds", str(arguments.seconds),
+            log=workdir / "target.log",
         )
+        processes.append(target)
         time.sleep(4)
 
         print("== decoy window")
@@ -102,6 +101,7 @@ def main(argv: list[str] | None = None) -> int:
             str(HERE / "verify.py"),
             "--events", str(workdir / "target.jsonl"),
             "--decoy-events", str(workdir / "decoy.jsonl"),
+            "--target-pid", str(target.pid),
             "--decoy-pid", str(decoy.pid),
             "--profiles", str(workdir / "profiles"),
             "--json", str(workdir / "report.json"),

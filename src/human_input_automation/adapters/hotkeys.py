@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from ..core.capabilities import CapabilityName, CapabilityState
 from ..core.target import DisplayServer, PlatformName, PlatformReport
 
 #: Default emergency-stop combination.
@@ -45,11 +46,18 @@ def describe_hotkey_support(host: PlatformReport) -> HotkeySupport:
     if host.platform is PlatformName.WINDOWS:
         return HotkeySupport(True, "Global hotkey supported.")
     if host.platform is PlatformName.MACOS:
-        if host.missing_permissions:
+        # Use the probed capability rather than a blanket guess: with
+        # CGPreflightListenEventAccess available, Input Monitoring can be
+        # answered definitively, and saying "may require" when we know the
+        # answer is just noise.
+        state = host.matrix.state(CapabilityName.GLOBAL_HOTKEY)
+        if state is CapabilityState.AVAILABLE:
+            return HotkeySupport(True, "Input Monitoring is granted; the global hotkey works.")
+        if state is CapabilityState.DENIED:
             return HotkeySupport(
                 False,
-                "macOS blocks global key monitoring until Accessibility/Input Monitoring "
-                "permission is granted to this application.",
+                "macOS blocks global key monitoring until Input Monitoring permission is "
+                "granted in System Settings > Privacy & Security > Input Monitoring.",
             )
         return HotkeySupport(
             None,

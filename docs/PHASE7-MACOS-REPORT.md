@@ -8,11 +8,11 @@ has been run, no window has been activated, and no key or click has been sent.
 
 | | |
 | --- | --- |
-| macOS execution attempted | **yes** — `--check` and `--diagnose` |
+| macOS execution attempted | **yes** — `--check`, `--diagnose`, and the verification harness |
 | Artifact built | no — the `build` job for `macos-14` has never run |
 | Artifact launched | no — run from a source checkout |
 | Real input executed | **no** |
-| Window enumeration executed | **no** |
+| Window enumeration executed | **yes** — 8 windows listed through the real adapter |
 | Signing | NOT PERFORMED — no Developer ID credentials |
 | Notarization | NOT PERFORMED — no credentials |
 
@@ -62,6 +62,48 @@ has been run, no window has been activated, and no key or click has been sent.
    capability they gated. Now one note per permission.
 6. **The banner led with "multi monitor"** while two permissions were
    unconfirmed. Unconfirmed permissions now outrank cosmetic limits.
+
+## Second run: the verification harness
+
+Executed on the same Mac after the fixes above. It got as far as target
+discovery and stopped there.
+
+```
+=== environment ===
+  [PASS] platform detection      macos/quartz
+  [PASS] screen geometry         1 monitor, 1792x1120, logical coordinates
+=== target discovery ===
+  [FAIL] locate verification target
+         8 window(s) listed, none is the verification target
+```
+
+### What that proves
+
+* **Window enumeration works on macOS.** Eight windows were listed through the
+  real pywinctl adapter. The capability matrix says `unknown` because the
+  *permission* cannot be preflighted, but the operation itself succeeded — so
+  Automation is effectively granted to the terminal, and enumeration is
+  **verified in practice**.
+* **`CGPreflightListenEventAccess` fixed the Input Monitoring probe**:
+  `global_hotkey` moved from `unknown` to `available` between the two runs.
+
+### The blocker, and why it is a harness bug
+
+The harness identified its own window by *application identity*. On Linux that
+is the WM_CLASS, which carries the Qt application name the target sets
+(`automation-verify-target`). **macOS has no WM_CLASS**: pywinctl reports the
+*process* name, so a Python script's window is called `Python`, exactly like
+every other Python window on the machine.
+
+Fixed by matching on the **process id** the target records at startup, falling
+back to application identity and then the exact window title. The failure
+message now also lists what it did see, so the next mismatch is diagnosable.
+
+This has a real consequence for users, not just for the harness: on macOS a
+saved profile's "application identity" is coarse. Two windows of the same
+application are then indistinguishable by identity alone — the resolver
+correctly reports `TARGET_AMBIGUOUS` rather than guessing, and the saved window
+title is what disambiguates them. Two regression tests cover it.
 
 ### Observed but not fixed
 
@@ -184,14 +226,14 @@ answer; the screen port already declares macOS coordinates as `logical`.
 
 | Capability | Result | Notes |
 | --- | --- | --- |
-| Platform detection | NOT TESTED | |
+| Platform detection | **PASS** | `macos/quartz`, backend `pywinctl` |
 | Packaged `.app` / `.dmg` builds | NOT TESTED | |
 | Artifact launches (unsigned → right-click Open) | NOT TESTED | |
 | Accessibility state before granting | NOT TESTED | expect denied/unknown |
 | Accessibility after granting + restart | NOT TESTED | |
-| Input Monitoring reported separately | NOT TESTED | |
+| Input Monitoring reported separately | **PASS** | probes `available` via `CGPreflightListenEventAccess` |
 | Automation (System Events) prompt appears | NOT TESTED | new in this phase |
-| Window enumeration | NOT TESTED | needs Automation |
+| Window enumeration | **PASS** | 8 windows listed through the real pywinctl adapter |
 | Target activation (decoy focused) | NOT TESTED | release-blocking |
 | Activation failure → zero input | NOT TESTED | release-blocking |
 | Focus re-verification | NOT TESTED | |
@@ -201,7 +243,7 @@ answer; the screen port already declares macOS coordinates as `logical`.
 | Key hold/release cleanup | NOT TESTED | release-blocking |
 | Mouse movement, duration, clicks | NOT TESTED | |
 | Retina coordinates (points vs pixels) | NOT TESTED | |
-| Multi-monitor geometry | NOT TESTED | |
+| Multi-monitor geometry | PARTIAL | single Retina display read correctly; scale reported as 1x (see above) |
 | Keyboard layouts (US + non-US) | NOT TESTED | |
 | Global hotkey `Ctrl+Shift+F9` | NOT TESTED | needs Input Monitoring |
 | Emergency stop matrix | NOT TESTED | release-blocking |

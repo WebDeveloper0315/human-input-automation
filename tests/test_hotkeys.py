@@ -53,13 +53,34 @@ def test_wayland_is_reported_as_unsupported_with_a_reason() -> None:
     assert "Wayland" in support.reason
 
 
-def test_macos_without_permission_is_unsupported_and_with_it_is_unknown() -> None:
+def test_macos_hotkey_support_follows_the_probed_input_monitoring_state() -> None:
+    """Verified on a real Mac: CGPreflightListenEventAccess answers definitively.
+
+    Before this, macOS always reported "may require Input Monitoring" even when
+    the permission had been granted and the capability probe said available.
+    """
+    from human_input_automation.adapters.platform_info import describe_host
+
+    granted = describe_hotkey_support(
+        describe_host(
+            PlatformName.MACOS, DisplayServer.QUARTZ, env={}, input_monitoring_trusted=True
+        )
+    )
+    assert granted.available is True
+
     denied = describe_hotkey_support(
-        host(PlatformName.MACOS, DisplayServer.QUARTZ, missing_permissions=("Accessibility",))
+        describe_host(
+            PlatformName.MACOS, DisplayServer.QUARTZ, env={}, input_monitoring_trusted=False
+        )
     )
     assert denied.available is False
+    assert "Input Monitoring" in denied.reason
 
-    unknown = describe_hotkey_support(host(PlatformName.MACOS, DisplayServer.QUARTZ))
+    unknown = describe_hotkey_support(
+        describe_host(
+            PlatformName.MACOS, DisplayServer.QUARTZ, env={}, input_monitoring_trusted=None
+        )
+    )
     assert unknown.available is None, "unknown must not be reported as no"
 
 
