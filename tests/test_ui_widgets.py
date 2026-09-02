@@ -142,6 +142,33 @@ def test_target_panel_starts_with_no_selection() -> None:
     assert "none selected" in panel.active_label.text()
 
 
+def test_target_panel_keeps_the_active_line_clear_of_the_window_list(qt_app: Any) -> None:
+    """A long target description must not be drawn over the table above it.
+
+    The panel is squeezed by a splitter, and a minimum height set while the
+    label still said "none selected" left the layout no room for the two or
+    three lines a real window's description needs - so it overlapped them onto
+    the list. Seen on a real X server before it was fixed.
+    """
+    panel = TargetPanel()
+    panel.resize(274, 185)  # the width and the old floor the splitter imposed
+    panel.show()
+    qt_app.processEvents()
+
+    panel.set_listing(
+        TargetListing(
+            (make_target("h1", "A Window With A Long Enough Title To Wrap Several Times"),)
+        )
+    )
+    panel.table.selectRow(0)
+    qt_app.processEvents()
+
+    label = panel.active_label.geometry()
+    assert label.top() >= panel.table.geometry().bottom(), "the label overlaps the window list"
+    assert panel.minimumHeight() >= panel.minimumSizeHint().height()
+    panel.hide()
+
+
 def test_target_panel_shows_the_reason_when_enumeration_is_unavailable() -> None:
     panel = TargetPanel()
     panel.set_listing(TargetListing((), "Wayland does not let applications enumerate windows"))

@@ -163,10 +163,19 @@ class MainWindow(QMainWindow):
         # child to zero height, which is how the timing fields disappeared.
         # Room for the header plus a couple of whole rows: a half-clipped row
         # reads as a rendering fault.
-        self.target_panel.setMinimumHeight(185)
-        self.action_editor.setMinimumHeight(185)
-        self.dry_run_panel.setMinimumHeight(140)
-        self.run_log.setMinimumHeight(90)
+        #
+        # These are floors, never ceilings. Setting a minimum *below* what a
+        # panel's own contents need would let the splitter squeeze it until its
+        # layout had to overlap its widgets - which is exactly what happened to
+        # the target panel, whose active-target label was drawn over the window
+        # list once a real target made it wrap onto a second line.
+        for panel, floor in (
+            (self.target_panel, 185),
+            (self.action_editor, 185),
+            (self.dry_run_panel, 140),
+            (self.run_log, 90),
+        ):
+            panel.setMinimumHeight(max(floor, panel.minimumSizeHint().height()))
         for splitter in (top, middle, body):
             splitter.setChildrenCollapsible(False)
 
