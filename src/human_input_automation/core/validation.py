@@ -257,6 +257,24 @@ def _validate_balance(actions: tuple[Action, ...]) -> list[ValidationIssue]:
     return issues
 
 
+def shortest_run_seconds(plan: AutomationPlan) -> float:
+    """A floor on how long ``plan`` can take: typed characters plus waits.
+
+    Deliberately a floor, not an estimate. Every per-character delay is taken at
+    the fastest the timing profile can produce it, and the keystrokes an action
+    sends around its text are ignored, so a plan this says will not fit really
+    will not fit. The dry run, which executes the plan against a virtual clock,
+    is the place to look for a realistic duration.
+    """
+    timing = plan.timing
+    fastest_char_ms = min(
+        timing.max_delay_ms, max(timing.min_delay_ms, timing.char_delay_ms - timing.char_jitter_ms)
+    )
+    typing_ms = plan.total_text_length * fastest_char_ms
+    waiting_ms = sum(action.duration_ms for action in plan.actions if isinstance(action, Wait))
+    return (typing_ms + waiting_ms) / 1000
+
+
 def validate_plan(
     plan: AutomationPlan,
     *,
@@ -289,6 +307,19 @@ def validate_plan(
 
     for index, action in enumerate(plan.actions):
         issues.extend(validate_action(action, index, limits, host, screen))
+
+    if limits.max_run_duration_s is not None:
+        shortest = shortest_run_seconds(plan)
+        if shortest > limits.max_run_duration_s:
+            issues.append(
+                _warning(
+                    "plan.exceeds_run_limit",
+                    f"this plan needs at least {shortest:.0f} s but the run limit is "
+                    f"{limits.max_run_duration_s:g} s; the actions still pending when the "
+                    "limit is reached will not run",
+                    "limits",
+                )
+            )
 
     if plan.typing.typo_rate > 0:
         issues.append(
