@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGroupBox,
@@ -72,6 +73,12 @@ class TargetPanel(QGroupBox):
         layout.addWidget(self.table)
         layout.addWidget(self.reason_label)
         layout.addWidget(self.active_label)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        # A narrower panel means more wrapped lines, so the room the label needs
+        # has to be recomputed whenever the splitter moves.
+        super().resizeEvent(event)
+        self._reserve_room_for_label()
 
     # -- state -------------------------------------------------------------
     @property
@@ -167,3 +174,26 @@ class TargetPanel(QGroupBox):
         text = active_target_text(self._selected, available=self._available)
         self.active_label.setText(text)
         self.active_label.setAccessibleDescription(text)
+        self._reserve_room_for_label()
+
+    def _reserve_room_for_label(self) -> None:
+        """Keep enough height for the whole active-target line.
+
+        The label wraps, so how tall it needs to be depends on both its text and
+        how wide the splitter has made this panel - and "none selected" is one
+        line where a real window's title, application and process id are three.
+        A minimum height, once set, is what the surrounding splitter honours; if
+        the text later needs another line the panel's layout has nowhere to put
+        it and draws it over the window list instead.
+
+        Only ever grows, so this converges rather than oscillating with the
+        relayout each change triggers.
+        """
+        width = self.active_label.width() or self.width()
+        if width <= 0:
+            return
+        needed = self.active_label.heightForWidth(width)
+        if needed <= self.active_label.minimumHeight():
+            return
+        self.active_label.setMinimumHeight(needed)
+        self.setMinimumHeight(max(self.minimumHeight(), self.minimumSizeHint().height()))

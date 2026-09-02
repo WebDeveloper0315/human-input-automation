@@ -119,6 +119,21 @@ def test_text_is_typed_into_an_editor_that_already_has_content() -> None:
     assert editor.text == "header\ndef f():\n    return 1"
 
 
+def test_it_never_types_over_the_line_the_caret_is_already_on() -> None:
+    """Found by running the application: a second block ate the first one's end.
+
+    Reclaiming indentation means selecting to the start of the line, which is
+    right for a line the editor has just indented for us and wrong for the line
+    the user left the caret on - there, it selects their text and types over it.
+    """
+    editor = FakeEditor(text="}")
+    editor.row, editor.col = 0, 1     # caret at the end of a line with content
+
+    type_into(editor, TypeCode(text="next()\nline"))
+
+    assert editor.text == "}next()\nline"
+
+
 # ---------------------------------------------------------------------------
 # The individual compensations
 # ---------------------------------------------------------------------------

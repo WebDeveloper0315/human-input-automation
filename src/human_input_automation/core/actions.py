@@ -131,6 +131,11 @@ class TypeCode(TextAction):
     A blank line keeps whatever indentation the editor gave it: clearing it
     would mean pressing Delete or Backspace with nothing selected, which in an
     editor joins two lines together.
+
+    Reclaiming starts at the second line. The first one is typed where the
+    caret already is, and there is no indentation of the editor's there to
+    reclaim - only, possibly, text of the user's that selecting to the start of
+    the line would replace.
     """
 
     kind: ClassVar[str] = "type_code"

@@ -56,9 +56,15 @@ def handle_type_code(action: TypeCode, ctx: ExecutionContext) -> None:
             _tap(ctx, Key.ENTER)
 
         body = line.lstrip() if action.indent is IndentMode.EDITOR else line
-        # Nothing to type over on a line that is only the editor's indentation,
-        # and a selection there would be cleared by the next Enter anyway.
-        if action.indent is IndentMode.RECLAIM and body.strip():
+        # Reclaiming means selecting the indentation the editor inserted when
+        # *we* pressed Enter, so it only ever applies from the second line on.
+        # On the first line the caret is wherever the user left it, and there
+        # the same chord would select whatever is already on that line and type
+        # over it - losing text the plan never mentioned.
+        #
+        # A line that is only the editor's indentation is skipped too: there is
+        # nothing to type over it with, and the next Enter clears it anyway.
+        if index and action.indent is IndentMode.RECLAIM and body.strip():
             _chord(ctx, action.line_start_chord)
 
         if body:
