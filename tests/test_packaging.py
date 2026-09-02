@@ -244,7 +244,17 @@ def test_the_data_directory_problem_names_the_path_and_the_override() -> None:
     ],
 )
 def test_display_detection(env: dict[str, str], expected: bool) -> None:
-    assert has_display(env) is expected
+    assert has_display(env, platform="linux") is expected
+
+
+@pytest.mark.parametrize("platform", ["darwin", "win32"])
+def test_macos_and_windows_always_have_a_display(platform: str) -> None:
+    """DISPLAY is an X11 convention; asking about it elsewhere is meaningless.
+
+    Checking it unconditionally made every macOS launch report "no graphical
+    display was found" and refuse to open the window.
+    """
+    assert has_display({}, platform=platform) is True
 
 
 # -- packaging configuration ----------------------------------------------

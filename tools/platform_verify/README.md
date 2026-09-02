@@ -63,3 +63,27 @@ desktop session, on Windows and on macOS is still the manual checklist in
 `docs/RELEASE-CHECKLIST.md`.
 
 Results are recorded in `docs/PHASE6-REAL-PLATFORM-REPORT.md`.
+
+
+## Running it without root
+
+`run_x11_session.sh` needs `Xvfb`. Where the packages cannot be installed
+system-wide, extract them into a prefix and put that on `PATH`:
+
+```bash
+mkdir -p /tmp/xvfb && cd /tmp/xvfb
+apt-get download xvfb xserver-common x11-xkb-utils xkb-data
+for d in *.deb; do dpkg -x "$d" root; done
+
+mkdir -p bin && cat > bin/Xvfb <<'EOF'
+#!/bin/bash
+export PATH="/tmp/xvfb/root/usr/bin:$PATH"
+exec /tmp/xvfb/root/usr/bin/Xvfb -xkbdir /tmp/xvfb/root/usr/share/X11/xkb "$@"
+EOF
+chmod +x bin/Xvfb
+
+PATH=/tmp/xvfb/bin:$PATH bash tools/platform_verify/run_x11_session.sh /tmp/run
+```
+
+The `-xkbdir` matters: without it the server cannot find its keymaps and every
+key check fails for a reason that has nothing to do with the application.

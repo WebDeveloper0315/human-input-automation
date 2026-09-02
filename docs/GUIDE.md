@@ -164,8 +164,11 @@ and nothing is typed.
 
 ### macOS
 
-Implemented but **not yet verified on real hardware**. macOS needs **three**
-separate permissions, and the application names each one:
+**Verified on real hardware** (Apple Silicon, macOS 15): typing, named keys,
+chords, mouse movement and clicks on a Retina display, profiles, and the safety
+gate that stops a run when the target window cannot be confirmed focused.
+
+macOS needs **three** separate permissions, and the application names each one:
 
 | Permission | Unlocks | Granted in |
 | --- | --- | --- |
@@ -175,6 +178,28 @@ separate permissions, and the application names each one:
 
 Granting one does not grant the others, and macOS usually needs the application
 quit and reopened afterwards.
+
+**Starting the window on macOS.** Run it from Terminal in the environment you
+installed into:
+
+```bash
+source .venv/bin/activate
+human-input-automation
+```
+
+The window opens as a normal application and appears in the Dock as `Python`
+(a source checkout has no application bundle; the packaged `.app` shows the
+real name and icon). It asks for the front on start-up, but if the Terminal is
+full-screen the window can still be on the desktop behind it — use ⌘-Tab or the
+Dock icon.
+
+If nothing seems to happen, `human-input-automation --diagnose` prints the full
+platform report and sends no input.
+
+**Window activation is slower on macOS** than elsewhere: focusing a window goes
+through the Accessibility API, so a run can take a second or two to begin. The
+emergency stop is honoured throughout, including while a window is being
+focused.
 
 ---
 

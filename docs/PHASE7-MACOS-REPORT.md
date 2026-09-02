@@ -310,6 +310,29 @@ identity, and the reloaded profile ran with its input arriving.
 * The global hotkey stopping a run, now that it is posted through Quartz.
 * A non-US keyboard layout; a second monitor.
 
+## Fifth finding: the UI refused to start on macOS at all
+
+```
+$ human-input-automation
+Human Input Automation: no graphical display was found
+(DISPLAY and WAYLAND_DISPLAY are both unset)
+```
+
+`DISPLAY` and `WAYLAND_DISPLAY` are an X11 and Wayland convention. macOS draws
+through Quartz and Windows through the desktop window manager, and neither
+advertises itself in the environment, so the check was meaningless off Linux -
+it turned **every** macOS launch into "no graphical display was found". The
+function's own docstring said "Windows and macOS always have one"; the code
+never asked which platform it was on.
+
+The guard is now Linux-only, with regression tests for macOS and Windows. The
+window also asks to be brought to the front at start-up, because a process
+launched from Terminal with no application bundle does not come forward on its
+own and the window can open behind the terminal.
+
+This is the reason no one had run the UI on macOS: only the diagnostics and the
+harness, which never take that path, could start.
+
 ## Environment to record when this is run
 
 ```
