@@ -9,6 +9,7 @@ It lives in `tools/` and is never imported by the application.
 
 ```
 target_app.py         a harmless window that records the input it receives
+                      (F8 makes it write down what its text field holds)
 mini_wm.py            a minimal EWMH window manager, for bare X servers only
 verify.py             the driver: runs the checks and prints the results
 run_x11_session.sh    starts Xvfb + window manager + target + decoy, then verifies

@@ -20,7 +20,9 @@ from typing import Any
 from ..adapters.hotkeys import HotkeySupport
 from ..application.profiles import LoadedProfile, ProfileState
 from ..core.actions import (
+    DEFAULT_LINE_START_CHORD,
     Action,
+    IndentMode,
     KeyDown,
     KeyPress,
     KeyUp,
@@ -29,6 +31,7 @@ from ..core.actions import (
     MouseMove,
     MouseUp,
     Shortcut,
+    TypeCode,
     TypeText,
     Wait,
 )
@@ -52,6 +55,7 @@ from ..core.events import (
 from ..core.keys import MouseButton, normalize_key, parse_shortcut
 from ..core.target import PlatformName, PlatformReport, TargetWindow
 from ..core.timing import TimingProfile, TimingService
+from ..core.typing_style import TypingStyle
 
 # ---------------------------------------------------------------------------
 # Run state machine
@@ -657,6 +661,43 @@ def _build_type_text(values: Mapping[str, Any], delay: float | None) -> Action:
     return TypeText(text=str(values.get("text", "")), delay_after_ms=delay)
 
 
+#: Readable names for the indentation modes. The stored value stays the short
+#: enum member, so the file format does not carry a label the UI may reword.
+INDENT_LABELS: dict[IndentMode, str] = {
+    IndentMode.RECLAIM: "Replace what the editor indents",
+    IndentMode.EDITOR: "Let the editor indent it",
+    IndentMode.OFF: "Type the indentation as written",
+}
+_INDENT_BY_LABEL = {label: mode for mode, label in INDENT_LABELS.items()}
+
+#: Chords that select from the caret to the start of the line. The first works
+#: in VS Code on every platform; the second is what a native macOS editor wants.
+LINE_START_CHORDS: tuple[str, ...] = (DEFAULT_LINE_START_CHORD, "meta+shift+left")
+
+
+def _build_type_code(values: Mapping[str, Any], delay: float | None) -> Action:
+    indent = values.get("indent", INDENT_LABELS[IndentMode.RECLAIM])
+    return TypeCode(
+        text=str(values.get("text", "")),
+        indent=_INDENT_BY_LABEL.get(str(indent), IndentMode.RECLAIM),
+        drop_auto_pairs=bool(values.get("drop_auto_pairs", True)),
+        dismiss_suggestions=bool(values.get("dismiss_suggestions", True)),
+        line_start_chord=str(values.get("line_start_chord") or DEFAULT_LINE_START_CHORD),
+        delay_after_ms=delay,
+    )
+
+
+def _type_code_values(action: Action) -> dict[str, Any]:
+    assert isinstance(action, TypeCode)
+    return {
+        "text": action.text,
+        "indent": INDENT_LABELS[action.indent],
+        "drop_auto_pairs": action.drop_auto_pairs,
+        "dismiss_suggestions": action.dismiss_suggestions,
+        "line_start_chord": action.line_start_chord,
+    }
+
+
 def _build_key_press(values: Mapping[str, Any], delay: float | None) -> Action:
     return KeyPress(
         key=normalize_key(str(values.get("key", "")), location="key"),
@@ -729,6 +770,61 @@ ACTION_SPECS: tuple[ActionSpec, ...] = (
         build=_build_type_text,
         extract=lambda action: {"text": getattr(action, "text", "")},
         action_type=TypeText,
+    ),
+    ActionSpec(
+        kind="type_code",
+        label="Type into a code editor",
+        fields=(
+            FieldSpec(
+                "text",
+                "Code",
+                FieldKind.MULTILINE,
+                default="",
+                help_text="Typed line by line, compensating for what the editor does on its own.",
+            ),
+            FieldSpec(
+                "indent",
+                "Indentation",
+                FieldKind.CHOICE,
+                default=INDENT_LABELS[IndentMode.RECLAIM],
+                choices=tuple(INDENT_LABELS.values()),
+                help_text=(
+                    "An editor indents each new line for you. Replacing that keeps the code "
+                    "exactly as written; leaving it lets the editor decide the layout."
+                ),
+            ),
+            FieldSpec(
+                "drop_auto_pairs",
+                "Delete brackets the editor closes",
+                FieldKind.BOOL,
+                default=True,
+                help_text=(
+                    "Assumes the editor closes brackets for you, as VS Code does. Turn it off "
+                    "for an editor that does not: the Delete would take a real character."
+                ),
+            ),
+            FieldSpec(
+                "dismiss_suggestions",
+                "Press Escape before each new line",
+                FieldKind.BOOL,
+                default=True,
+                help_text=(
+                    "Closes the completion popup, so Enter starts a new line instead of "
+                    "accepting a suggestion."
+                ),
+            ),
+            FieldSpec(
+                "line_start_chord",
+                "Select to line start with",
+                FieldKind.CHOICE,
+                default=DEFAULT_LINE_START_CHORD,
+                choices=LINE_START_CHORDS,
+                help_text="Used to select the editor's indentation so it can be typed over.",
+            ),
+        ),
+        build=_build_type_code,
+        extract=_type_code_values,
+        action_type=TypeCode,
     ),
     ActionSpec(
         kind="key_press",
@@ -1003,6 +1099,34 @@ def build_timing_profile(values: Mapping[str, Any]) -> TimingProfile:
 def timing_to_values(profile: TimingProfile) -> dict[str, Any]:
     """Form values for an existing profile."""
     return {spec.name: getattr(profile, spec.name) for spec in TIMING_FIELDS}
+
+
+#: Rate offered when typing mistakes are switched on without a saved value.
+DEFAULT_TYPO_PERCENT = 3.0
+
+
+def typing_style_with_rate(
+    base: TypingStyle, *, enabled: bool, percent: float
+) -> TypingStyle:
+    """Apply the panel's two controls without losing the rest of a saved style.
+
+    A profile may carry pause values the panel does not show; switching mistakes
+    off has to leave those alone so switching them back on restores them.
+    """
+    if not enabled:
+        return base.with_changes(typo_rate=0.0, hesitation_rate=0.0)
+    return base.with_changes(
+        typo_rate=max(0.0, min(100.0, percent)) / 100.0,
+        hesitation_rate=base.hesitation_rate or TypingStyle.natural().hesitation_rate,
+    )
+
+
+def typing_style_to_values(style: TypingStyle) -> dict[str, Any]:
+    """Panel values for an existing style."""
+    return {
+        "enabled": not style.is_exact,
+        "percent": round(style.typo_rate * 100, 2) or DEFAULT_TYPO_PERCENT,
+    }
 
 
 def preview_delays(

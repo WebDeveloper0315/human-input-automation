@@ -31,6 +31,7 @@ from human_input_automation.application.profiles.serialization import (
 )
 from human_input_automation.core.actions import (
     Action,
+    IndentMode,
     KeyDown,
     KeyPress,
     KeyUp,
@@ -39,6 +40,7 @@ from human_input_automation.core.actions import (
     MouseMove,
     MouseUp,
     Shortcut,
+    TypeCode,
     TypeText,
     Wait,
 )
@@ -46,12 +48,22 @@ from human_input_automation.core.keys import Key, MouseButton
 from human_input_automation.core.plan import AutomationPlan, ExecutionLimits, RunOptions
 from human_input_automation.core.target import DisplayServer, PlatformName
 from human_input_automation.core.timing import TimingProfile
+from human_input_automation.core.typing_style import TypingStyle
 
 from .fakes import make_target
 
 ALL_ACTIONS: list[Action] = [
     TypeText(text="hello world"),
     TypeText(text="unicode: ä ß 日本語 🎉 \n\ttabbed", delay_after_ms=25.5),
+    TypeCode(text="def f():\n    return 1"),
+    TypeCode(
+        text="if (x) {\n}",
+        indent=IndentMode.EDITOR,
+        drop_auto_pairs=False,
+        dismiss_suggestions=False,
+        line_start_chord="meta+shift+left",
+        delay_after_ms=5.0,
+    ),
     KeyPress(key=Key.ENTER),
     KeyPress(key="a", count=7, delay_after_ms=0),
     KeyDown(key=Key.SHIFT),
@@ -196,14 +208,45 @@ def test_plan_round_trips_with_every_action() -> None:
         make_target(),
         ALL_ACTIONS,
         timing=TimingProfile(char_delay_ms=33),
+        typing=TypingStyle.natural(typo_rate=0.04),
         limits=ExecutionLimits(max_actions=99),
         options=RunOptions(seed=7),
     )
     restored = plan_from_dict(plan_to_dict(plan), make_target())
     assert restored.actions == plan.actions
     assert restored.timing == plan.timing
+    assert restored.typing == plan.typing
     assert restored.limits == plan.limits
     assert restored.options.seed == 7
+
+
+def test_a_plan_saved_before_typing_styles_existed_loads_with_the_default() -> None:
+    """An older file has no 'typing' section, and must still type exactly."""
+    restored = plan_from_dict({"actions": [{"type": "wait", "duration_ms": 10}]})
+    assert restored.typing == TypingStyle()
+    assert restored.typing.is_exact
+
+
+def test_an_impossible_typing_style_is_rejected_with_the_domain_message() -> None:
+    with pytest.raises(ProfileFormatError) as excinfo:
+        plan_from_dict({"actions": [], "typing": {"typo_rate": 4}})
+    assert "typo_rate" in str(excinfo.value)
+
+
+def test_an_unknown_typing_field_is_rejected() -> None:
+    with pytest.raises(ProfileFormatError):
+        plan_from_dict({"actions": [], "typing": {"undetectable": True}})
+
+
+def test_an_unknown_indent_mode_names_the_ones_that_exist() -> None:
+    with pytest.raises(ProfileFormatError) as excinfo:
+        action_from_dict({"type": "type_code", "text": "x", "indent": "magic"})
+    assert "reclaim" in str(excinfo.value)
+
+
+def test_an_unusable_line_start_chord_is_rejected() -> None:
+    with pytest.raises(ProfileFormatError):
+        action_from_dict({"type": "type_code", "text": "x", "line_start_chord": "shift+nope"})
 
 
 def test_a_plan_decoded_without_a_target_cannot_run() -> None:

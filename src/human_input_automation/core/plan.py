@@ -5,9 +5,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
-from .actions import Action, TypeText
+from .actions import Action, TextAction
 from .target import TargetWindow
 from .timing import TimingProfile
+from .typing_style import TypingStyle
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class AutomationPlan:
     target: TargetWindow
     actions: tuple[Action, ...] = ()
     timing: TimingProfile = field(default_factory=TimingProfile)
+    typing: TypingStyle = field(default_factory=TypingStyle)
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     options: RunOptions = field(default_factory=RunOptions)
     name: str = ""
@@ -74,10 +76,12 @@ class AutomationPlan:
         limits: ExecutionLimits | None = None,
         options: RunOptions | None = None,
         name: str = "",
+        typing: TypingStyle | None = None,
     ) -> None:
         object.__setattr__(self, "target", target)
         object.__setattr__(self, "actions", tuple(actions))
         object.__setattr__(self, "timing", timing or TimingProfile())
+        object.__setattr__(self, "typing", typing or TypingStyle())
         object.__setattr__(self, "limits", limits or ExecutionLimits())
         object.__setattr__(self, "options", options or RunOptions())
         object.__setattr__(self, "name", name)
@@ -85,7 +89,7 @@ class AutomationPlan:
     @property
     def total_text_length(self) -> int:
         """Number of characters this plan would type in total."""
-        return sum(len(a.text) for a in self.actions if isinstance(a, TypeText))
+        return sum(len(a.text) for a in self.actions if isinstance(a, TextAction))
 
     def with_changes(self, **changes: object) -> AutomationPlan:
         return replace(self, **changes)  # type: ignore[arg-type]

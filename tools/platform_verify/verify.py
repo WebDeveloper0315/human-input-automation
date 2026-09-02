@@ -53,6 +53,7 @@ from human_input_automation.core.actions import (  # noqa: E402
     MouseDown,
     MouseMove,
     Shortcut,
+    TypeCode,
     TypeText,
     Wait,
 )
@@ -60,6 +61,7 @@ from human_input_automation.core.events import RunStatus  # noqa: E402
 from human_input_automation.core.plan import AutomationPlan, RunOptions  # noqa: E402
 from human_input_automation.core.target import TargetWindow  # noqa: E402
 from human_input_automation.core.timing import TimingProfile  # noqa: E402
+from human_input_automation.core.typing_style import TypingStyle  # noqa: E402
 from human_input_automation.diagnostics import Diagnostics  # noqa: E402
 
 TARGET_APP_ID = "automation-verify-target"
@@ -346,6 +348,100 @@ def check_real_typing(service: AutomationService, target: TargetWindow, log: Eve
     log.wait_for(marker, len(text))
     received = log.typed_text(marker)
     report.ok("typed text arrived at the target", received == text,
+              f"expected {text!r}, received {received!r}")
+
+
+#: Small enough to type quickly, and shaped like the code that exposed the
+#: problem: nested brackets, a call, a string, and indentation on every level.
+CODE_SNIPPET = 'function test() {\n    if (ok) {\n        log("hi");\n    }\n    return 1;\n}'
+
+
+def check_code_typing(service: AutomationService, target: TargetWindow, log: EventLog,
+                      report: Report) -> None:
+    """A block of code must arrive as that block of code.
+
+    The target is a plain text box, not a code editor, so none of the
+    compensations have anything to compensate for here. That is the point: this
+    proves the extra keystrokes (Escape, Delete, shift+Home) really are sent
+    through the adapter and really are harmless where the editor is not
+    helping. Whether they cancel out VS Code's own behaviour is a separate
+    question, checked against the editor model in ``tests/test_editor_typing.py``
+    and, ultimately, by typing into VS Code itself.
+    """
+    from PySide6.QtCore import Qt
+
+    log.settle()
+    marker = log.count()
+    # Command+A on macOS: Control+A there means "start of line".
+    select_all = "meta+a" if sys.platform == "darwin" else "ctrl+a"
+    result = run_plan(service, plan_for(
+        target,
+        Shortcut.parse(select_all),
+        KeyPress(key="delete"),
+        TypeCode(text=CODE_SNIPPET),
+        KeyPress(key="f8"),
+    ))
+    if result is None:
+        report.add("code typing", FAIL, "the run did not finish")
+        return
+    report.ok("code typing run completed", result.status is RunStatus.COMPLETED,
+              result.summary())
+
+    events = log.wait_for_kinds(marker, ("content",), timeout=30)
+    snapshots = [event for event in events if event["kind"] == "content"]
+    if not snapshots:
+        report.add("typed code arrived unchanged", FAIL,
+                   "the target never reported its contents; F8 may not have arrived")
+        return
+    received = snapshots[-1].get("text", "")
+    report.ok("typed code arrived unchanged in a plain text box",
+              received == CODE_SNIPPET,
+              f"expected {CODE_SNIPPET!r}, received {received!r}")
+
+    pressed = {event.get("key") for event in events if event["kind"] == "key_press"}
+    expected = {
+        "escape": int(Qt.Key.Key_Escape),
+        "delete": int(Qt.Key.Key_Delete),
+        "home": int(Qt.Key.Key_Home),
+    }
+    missing = [name for name, code in expected.items() if code not in pressed]
+    report.ok("the editor compensations were sent as real keys", not missing,
+              f"missing: {', '.join(missing)}" if missing else "escape, delete and home arrived")
+
+
+def check_typing_mistakes(service: AutomationService, target: TargetWindow, log: EventLog,
+                          report: Report) -> None:
+    """Deliberate mistakes must be corrected before the run ends."""
+    from PySide6.QtCore import Qt
+
+    log.settle()
+    marker = log.count()
+    text = "the quick brown fox jumps over the lazy dog"
+    select_all = "meta+a" if sys.platform == "darwin" else "ctrl+a"
+    plan = plan_for(
+        target,
+        Shortcut.parse(select_all),
+        KeyPress(key="delete"),
+        TypeText(text=text),
+        KeyPress(key="f8"),
+        seed=20260902,
+    )
+    result = run_plan(service, plan.with_changes(typing=TypingStyle.natural(typo_rate=0.25)))
+    if result is None:
+        report.add("typing mistakes", FAIL, "the run did not finish")
+        return
+
+    events = log.wait_for_kinds(marker, ("content",), timeout=30)
+    backspaces = sum(
+        1 for event in events
+        if event["kind"] == "key_press" and event.get("key") == int(Qt.Key.Key_Backspace)
+    )
+    report.ok("mistakes were actually made and taken back", backspaces > 0,
+              f"{backspaces} backspace(s) sent")
+
+    snapshots = [event for event in events if event["kind"] == "content"]
+    received = snapshots[-1].get("text", "") if snapshots else ""
+    report.ok("the corrected text is the text that was asked for", received == text,
               f"expected {text!r}, received {received!r}")
 
 
@@ -951,6 +1047,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             print("\n=== real keyboard input ===", flush=True)
             check_real_typing(service, target, log, report)
+            check_code_typing(service, target, log, report)
+            check_typing_mistakes(service, target, log, report)
             check_named_keys(service, target, log, report)
             check_shortcut(service, target, log, report)
             check_command_modifier(service, target, log, report)

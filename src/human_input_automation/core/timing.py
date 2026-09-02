@@ -16,6 +16,7 @@ import random
 from dataclasses import dataclass, replace
 
 from .errors import ValidationError, ValidationIssue
+from .typing_style import TypingStyle
 
 DEFAULT_PUNCTUATION = ".,;:!?"
 
@@ -124,6 +125,10 @@ class TimingProfile:
 class TimingService:
     """Turns a :class:`TimingProfile` into concrete delays.
 
+    It also carries the run's :class:`~.typing_style.TypingStyle`, which decides
+    how faithfully text is typed. The two travel together because both are read
+    by the same handlers and both draw on the same seeded generator.
+
     Deterministic when constructed with a seed: the same seed and the same
     sequence of calls always produce the same delays.
     """
@@ -132,16 +137,27 @@ class TimingService:
         self,
         profile: TimingProfile | None = None,
         *,
+        style: TypingStyle | None = None,
         seed: int | None = None,
         rng: random.Random | None = None,
     ) -> None:
         self.profile = profile or TimingProfile()
+        self.style = style or TypingStyle()
         self._rng = rng if rng is not None else random.Random(seed)
         self._seed = seed
 
     @property
     def seed(self) -> int | None:
         return self._seed
+
+    @property
+    def rng(self) -> random.Random:
+        """The run's random source.
+
+        Shared deliberately: typing mistakes are planned from the same generator
+        as the delays, so one seed still reproduces the whole run.
+        """
+        return self._rng
 
     def _sample(self, base: float, jitter: float) -> float:
         if jitter <= 0:

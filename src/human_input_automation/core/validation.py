@@ -17,7 +17,8 @@ from .actions import (
     MouseMove,
     MouseUp,
     Shortcut,
-    TypeText,
+    TextAction,
+    TypeCode,
     Wait,
 )
 from .capabilities import CapabilityName
@@ -131,6 +132,8 @@ def _keys_of(action: Action) -> tuple[KeyLike, ...]:
         return (action.key,)
     if isinstance(action, Shortcut):
         return action.keys
+    if isinstance(action, TypeCode):
+        return action.keys_used
     return ()
 
 
@@ -195,7 +198,7 @@ def validate_action(
                 )
             )
 
-    if isinstance(action, TypeText) and len(action.text) > limits.max_text_length:
+    if isinstance(action, TextAction) and len(action.text) > limits.max_text_length:
         issues.append(
             _error(
                 "action.text_too_long",
@@ -286,6 +289,17 @@ def validate_plan(
 
     for index, action in enumerate(plan.actions):
         issues.extend(validate_action(action, index, limits, host, screen))
+
+    if plan.typing.typo_rate > 0:
+        issues.append(
+            _warning(
+                "plan.typing_mistakes",
+                f"deliberate typing mistakes are on for about "
+                f"{plan.typing.typo_rate:.1%} of letters; each one is removed with backspace "
+                "before typing continues, but the target application sees it first",
+                "typing",
+            )
+        )
 
     issues.extend(_validate_balance(plan.actions))
     issues.extend(
