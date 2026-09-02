@@ -65,7 +65,7 @@ class RecordingWindowControl:
 
     calls: list[tuple[str, str]] = field(default_factory=list)
 
-    def activate(self, target: TargetWindow) -> bool:
+    def activate(self, target: TargetWindow, cancel: CancelToken | None = None) -> bool:
         self.calls.append(("activate", target.handle))
         return True
 

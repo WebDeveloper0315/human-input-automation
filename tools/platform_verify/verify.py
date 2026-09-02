@@ -328,7 +328,9 @@ def check_named_keys(service: AutomationService, target: TargetWindow, log: Even
     for name, codes in expected.items():
         marker = log.count()
         run_plan(service, plan_for(target, KeyPress(key=name)))
-        events = log.wait_for(marker, 1, timeout=5)
+        # macOS window activation goes through AppleScript and can take
+        # seconds, so a five second budget was not always enough.
+        events = log.wait_for(marker, 1, timeout=15)
         keys = [event.get("key") for event in events if event["kind"] == "key_press"]
         report.ok(f"named key {name!r} arrived", any(key in codes for key in keys),
                   f"expected one of {codes}, received {keys}")
@@ -339,14 +341,23 @@ def check_shortcut(service: AutomationService, target: TargetWindow, log: EventL
     """A chord must arrive with its modifier applied, not as separate keys."""
     from PySide6.QtCore import Qt
 
+    # Qt on macOS swaps these when reporting: the physical Control key arrives
+    # as Qt::Key_Meta / MetaModifier, and Command arrives as ControlModifier.
+    # Verified on a real Mac, where ctrl+a produced [Key_Meta, Key_A].
+    on_macos = sys.platform == "darwin"
+    modifier = (
+        int(Qt.KeyboardModifier.MetaModifier.value)
+        if on_macos
+        else int(Qt.KeyboardModifier.ControlModifier.value)
+    )
     marker = log.count()
     run_plan(service, plan_for(target, Shortcut.parse("ctrl+a")))
-    events = log.wait_for(marker, 2, timeout=5)
+    events = log.wait_for(marker, 2, timeout=10)
     with_control = [
         event for event in events
         if event["kind"] == "key_press"
         and event.get("key") == int(Qt.Key.Key_A)
-        and event.get("modifiers", 0) & int(Qt.KeyboardModifier.ControlModifier.value)
+        and event.get("modifiers", 0) & modifier
     ]
     keys = [event.get("key") for event in events if event["kind"] == "key_press"]
     report.ok("shortcut ctrl+a arrived with the modifier held", bool(with_control),
@@ -360,6 +371,31 @@ def target_click_point(log: EventLog, fallback: tuple[int, int] = (400, 300)) ->
             x, y, width, height = event["geometry"]
             return (int(x + width / 2), int(y + height / 2))
     return fallback
+
+
+def check_command_modifier(service: AutomationService, target: TargetWindow, log: EventLog,
+                           report: Report) -> None:
+    """On macOS, META must be Command - never Control.
+
+    Qt reports Command as ControlModifier on macOS, so a correct meta+a arrives
+    with ControlModifier set. Anywhere else this check does not apply.
+    """
+    if sys.platform != "darwin":
+        report.add("META maps to Command (macOS only)", SKIP, "not macOS")
+        return
+    from PySide6.QtCore import Qt
+
+    marker = log.count()
+    run_plan(service, plan_for(target, Shortcut.parse("meta+a")))
+    events = log.wait_for(marker, 2, timeout=10)
+    with_command = [
+        event for event in events
+        if event["kind"] == "key_press"
+        and event.get("key") == int(Qt.Key.Key_A)
+        and event.get("modifiers", 0) & int(Qt.KeyboardModifier.ControlModifier.value)
+    ]
+    keys = [e.get("key") for e in events if e["kind"] == "key_press"]
+    report.ok("META maps to Command, not Control", bool(with_command), f"keys seen: {keys}")
 
 
 def check_mouse(service: AutomationService, target: TargetWindow, log: EventLog,
@@ -418,7 +454,15 @@ def check_activation_against_decoy(service: AutomationService, target: TargetWin
         if not candidates:
             candidates = [window for window in listed if window.title == "Decoy Window"]
         if not candidates:
-            report.add("focus the decoy window", FAIL, "the decoy window was not enumerated")
+            seen = "; ".join(
+                f"{w.title!r} (app={w.app_id!r}, pid={w.process_id})" for w in listed[:6]
+            )
+            report.add(
+                "focus the decoy window",
+                FAIL,
+                f"the decoy (pid {decoy_pid}) was not enumerated among "
+                f"{len(listed)} window(s). Saw: {seen or '(nothing)'}",
+            )
             return
         decoy = candidates[0]
         activated = adapters.windows.activate(decoy) if adapters.windows else False
@@ -769,6 +813,7 @@ def main(argv: list[str] | None = None) -> int:
             check_real_typing(service, target, log, report)
             check_named_keys(service, target, log, report)
             check_shortcut(service, target, log, report)
+            check_command_modifier(service, target, log, report)
 
             print("\n=== real mouse input ===", flush=True)
             check_mouse(service, target, log, report)

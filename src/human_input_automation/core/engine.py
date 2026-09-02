@@ -259,7 +259,7 @@ class AutomationEngine:
         control.begin()
         emit(RunStarted(plan.name, len(plan.actions), plan.options.dry_run))
         try:
-            self._activate_target(plan, windows, emit)
+            self._activate_target(plan, windows, emit, control)
             for index, action in enumerate(plan.actions):
                 ctx.index = index
                 ctx.checkpoint()
@@ -334,6 +334,7 @@ class AutomationEngine:
         plan: AutomationPlan,
         windows: WindowControlPort | None,
         emit: Callable[[RunEvent], None],
+        control: RunControl,
     ) -> None:
         target = plan.target
         if target.is_focused_window:
@@ -343,7 +344,9 @@ class AutomationEngine:
             raise TargetActivationError(
                 "a target window was selected but no window control adapter is available"
             )
-        if not windows.activate(target):
+        # The token goes in so a stop during activation is honoured: on macOS
+        # this call can otherwise take ten seconds.
+        if not windows.activate(target, control):
             raise TargetActivationError(f"could not activate target window {target.describe()}")
 
         active = windows.is_active(target)

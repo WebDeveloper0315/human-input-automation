@@ -142,7 +142,7 @@ def test_enumeration_is_skipped_when_the_capability_is_unavailable() -> None:
 
 def test_activation_succeeds_and_is_verified() -> None:
     window = FakeWindow("0x42", "Notepad", active=True)
-    adapter = PyWinCtlWindows(host(), module(window))
+    adapter = PyWinCtlWindows(host(), module(window), activation_timeout=0.1)
     target = adapter.find("0x42")
     assert target is not None
     assert adapter.activate(target) is True
@@ -154,7 +154,7 @@ def test_activation_of_a_closed_window_fails_without_raising() -> None:
     adapter = PyWinCtlWindows(host(), module(FakeWindow("0x42", "Notepad")))
     target = adapter.find("0x42")
     assert target is not None
-    gone = PyWinCtlWindows(host(), module())
+    gone = PyWinCtlWindows(host(), module(), activation_timeout=0.1)
     assert gone.activate(target) is False
     assert gone.is_active(target) is None
 
@@ -173,7 +173,7 @@ def test_a_recycled_handle_from_another_process_is_refused() -> None:
 
 def test_an_exception_during_activation_is_reported_as_failure() -> None:
     window = FakeWindow("0x42", "Notepad", raises="activate")
-    adapter = PyWinCtlWindows(host(), module(window))
+    adapter = PyWinCtlWindows(host(), module(window), activation_timeout=0.1)
     target = adapter.find("0x42")
     assert target is not None
     assert adapter.activate(target) is False
@@ -188,13 +188,64 @@ def test_activation_is_refused_when_the_platform_forbids_it() -> None:
     assert window.activated == 0
 
 
-def test_focus_is_unknown_when_verification_is_unavailable() -> None:
+def test_focus_is_unknown_only_when_the_platform_forbids_the_check() -> None:
+    """Regression: an *unprobed* permission disabled verification entirely.
+
+    On macOS the Automation permission cannot be preflighted, so the state is
+    UNKNOWN. Treating that as "cannot verify" meant focus was never checked and
+    input reached a window the user had not selected. Unknown means try.
+    """
     from human_input_automation.core.target import TargetWindow
 
-    adapter = PyWinCtlWindows(
-        host(state=CapabilityState.UNKNOWN), module(FakeWindow("0x42", "Notepad"))
+    unknown = PyWinCtlWindows(
+        host(state=CapabilityState.UNKNOWN),
+        module(FakeWindow("0x42", "Notepad", active=True)),
+        activation_timeout=0.05,
     )
-    assert adapter.is_active(TargetWindow(handle="0x42")) is None
+    assert unknown.is_active(TargetWindow(handle="0x42")) is True
+
+    forbidden = PyWinCtlWindows(
+        host(state=CapabilityState.UNAVAILABLE), module(FakeWindow("0x42", "Notepad"))
+    )
+    assert forbidden.is_active(TargetWindow(handle="0x42")) is None
+
+
+def test_activation_is_not_reported_until_focus_is_confirmed() -> None:
+    """Regression, observed on macOS: the first run typed into the decoy window.
+
+    pywinctl's activate() returned success while the window server had not yet
+    moved keyboard focus, and because verification was disabled nothing caught
+    it. Activation now has to observe the focus move.
+    """
+    from human_input_automation.core.target import TargetWindow
+
+    never_focuses = FakeWindow("0x42", "Notepad", active=False)
+    adapter = PyWinCtlWindows(
+        host(state=CapabilityState.UNKNOWN), module(never_focuses), activation_timeout=0.1
+    )
+    assert adapter.activate(TargetWindow(handle="0x42")) is False
+    assert never_focuses.activated == 1, "it should have tried exactly once"
+
+
+def test_activation_stops_promptly_when_the_run_is_cancelled() -> None:
+    """macOS activation can take ten seconds; a stop must not wait for it."""
+    import time
+
+    from human_input_automation.core.control import RunControl
+    from human_input_automation.core.target import TargetWindow
+
+    control = RunControl()
+    control.begin()
+    control.emergency_stop()
+
+    adapter = PyWinCtlWindows(
+        host(state=CapabilityState.UNKNOWN),
+        module(FakeWindow("0x42", "Notepad", active=False)),
+        activation_timeout=30.0,
+    )
+    started = time.monotonic()
+    assert adapter.activate(TargetWindow(handle="0x42"), control) is False
+    assert time.monotonic() - started < 2.0
 
 
 def test_unsupported_reason_explains_wayland() -> None:
@@ -219,8 +270,12 @@ def test_a_window_whose_handle_changed_is_matched_by_its_process() -> None:
     target = adapter.find("('Editor', 'notes.txt')")
     assert target is not None
 
-    renamed = FakeWindow("('Editor', 'notes.txt *')", "notes.txt *", pid=4321, app="Editor")
-    after = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(renamed))
+    renamed = FakeWindow(
+        "('Editor', 'notes.txt *')", "notes.txt *", pid=4321, app="Editor", active=True
+    )
+    after = PyWinCtlWindows(
+        host(PlatformName.MACOS, DisplayServer.QUARTZ), module(renamed), activation_timeout=0.1
+    )
     assert after.activate(target) is True
     assert renamed.activated == 1
 
@@ -234,7 +289,11 @@ def test_a_changed_handle_with_several_candidates_refuses_to_guess() -> None:
 
     first = FakeWindow("('Editor', 'b.txt')", "b.txt", pid=4321, app="Editor")
     second = FakeWindow("('Editor', 'c.txt')", "c.txt", pid=4321, app="Editor")
-    after = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(first, second))
+    after = PyWinCtlWindows(
+        host(PlatformName.MACOS, DisplayServer.QUARTZ),
+        module(first, second),
+        activation_timeout=0.1,
+    )
     assert after.activate(target) is False
     assert first.activated == 0 and second.activated == 0
 
@@ -246,7 +305,9 @@ def test_a_changed_handle_never_matches_a_different_process() -> None:
     assert target is not None
 
     stranger = FakeWindow("('Bank', 'Account')", "Account", pid=9999, app="Bank")
-    after = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module(stranger))
+    after = PyWinCtlWindows(
+        host(PlatformName.MACOS, DisplayServer.QUARTZ), module(stranger), activation_timeout=0.1
+    )
     assert after.activate(target) is False
     assert stranger.activated == 0
 
