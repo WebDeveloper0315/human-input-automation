@@ -238,6 +238,11 @@ def run_gui(paths: ApplicationPaths | None = None) -> int:
     service = build_service(paths=resolved)
     window = MainWindow(service, paths=resolved)
     window.show()
+    # Launched from a terminal, the window can open behind the terminal itself -
+    # most visibly on macOS, where an unbundled process does not come forward on
+    # its own. Ask for the front once, at start-up only.
+    window.raise_()
+    window.activateWindow()
     return int(app.exec())
 
 

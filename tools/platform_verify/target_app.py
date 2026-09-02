@@ -150,6 +150,10 @@ def build_window(recorder: EventRecorder, title: str) -> Any:
                     y=int(position.y()),
                 )
                 self.window.note("mouse_press")
+            elif kind == QEvent.Type.WindowActivate:
+                recorder.record("focus_in")
+            elif kind == QEvent.Type.WindowDeactivate:
+                recorder.record("focus_out")
             elif kind == QEvent.Type.MouseButtonRelease:
                 recorder.record("mouse_release", button=int(event.button().value))
                 self.window.note("mouse_release")

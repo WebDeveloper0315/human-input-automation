@@ -8,6 +8,7 @@ instead of a traceback in a console nobody is looking at.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 
 from .metadata import APP_NAME
@@ -38,7 +39,7 @@ MISSING_GUI = StartupProblem(
 NO_DISPLAY = StartupProblem(
     headline="no graphical display was found",
     detail=(
-        "This machine has no desktop session for the window to appear on "
+        "There is no X11 or Wayland session for the window to appear on "
         "(DISPLAY and WAYLAND_DISPLAY are both unset).\n"
         "Run the application from a desktop session, or use the headless "
         "commands:\n"
@@ -77,13 +78,20 @@ def data_directory_problem(path: object, error: Exception) -> StartupProblem:
     )
 
 
-def has_display(env: dict[str, str]) -> bool:
+def has_display(env: dict[str, str], platform: str | None = None) -> bool:
     """Whether some display server is reachable.
 
-    Windows and macOS always have one; on Linux it is only true when an X11 or
-    Wayland session is present. ``QT_QPA_PLATFORM`` overrides everything,
-    because that is how offscreen and headless testing runs.
+    ``DISPLAY`` and ``WAYLAND_DISPLAY`` are an X11 and Wayland convention, and
+    asking about them anywhere else is meaningless: macOS draws through Quartz
+    and Windows through the desktop window manager, neither of which advertises
+    itself in the environment. Checking them unconditionally turned every macOS
+    launch into "no graphical display was found".
+
+    ``QT_QPA_PLATFORM`` overrides everything, because that is how offscreen and
+    headless testing runs.
     """
     if env.get("QT_QPA_PLATFORM"):
+        return True
+    if (platform if platform is not None else sys.platform) not in ("linux", "linux2"):
         return True
     return bool(env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"))

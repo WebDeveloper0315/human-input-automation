@@ -33,6 +33,7 @@ import argparse
 import contextlib
 import json
 import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
@@ -165,6 +166,42 @@ class EventLog:
                 return events
             time.sleep(0.05)
         return self.since(marker)
+
+    def wait_for_key(self, marker: int, codes: tuple[int, ...],
+                     timeout: float = 15.0) -> list[dict[str, Any]]:
+        """Wait for one *particular* key, not merely for some activity.
+
+        Waiting for a count made every check hostage to the one before it: on
+        macOS a slow activation pushed one key past its deadline, the next
+        check saw that stale key, and the mismatch walked down the whole list.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            events = self.since(marker)
+            if any(event["kind"] == "key_press" and event.get("key") in codes
+                   for event in events):
+                return events
+            if time.monotonic() >= deadline:
+                return events
+            time.sleep(0.05)
+
+    def settle(self, quiet_for: float = 0.4, timeout: float = 20.0) -> None:
+        """Wait until nothing new has been recorded for a moment.
+
+        Late input from a previous check must not be counted against the next
+        one, and on macOS input can arrive seconds after the run reports done.
+        """
+        deadline = time.monotonic() + timeout
+        last = self.count()
+        quiet_since = time.monotonic()
+        while time.monotonic() < deadline:
+            time.sleep(0.05)
+            current = self.count()
+            if current != last:
+                last = current
+                quiet_since = time.monotonic()
+            elif time.monotonic() - quiet_since >= quiet_for:
+                return
 
     def wait_for_kinds(self, marker: int, kinds: tuple[str, ...],
                        timeout: float = 10.0) -> list[dict[str, Any]]:
@@ -326,11 +363,12 @@ def check_named_keys(service: AutomationService, target: TargetWindow, log: Even
         "page_down": (int(Qt.Key.Key_PageDown),),
     }
     for name, codes in expected.items():
+        log.settle()
         marker = log.count()
         run_plan(service, plan_for(target, KeyPress(key=name)))
         # macOS window activation goes through AppleScript and can take
         # seconds, so a five second budget was not always enough.
-        events = log.wait_for(marker, 1, timeout=15)
+        events = log.wait_for_key(marker, codes, timeout=15)
         keys = [event.get("key") for event in events if event["kind"] == "key_press"]
         report.ok(f"named key {name!r} arrived", any(key in codes for key in keys),
                   f"expected one of {codes}, received {keys}")
@@ -350,9 +388,10 @@ def check_shortcut(service: AutomationService, target: TargetWindow, log: EventL
         if on_macos
         else int(Qt.KeyboardModifier.ControlModifier.value)
     )
+    log.settle()
     marker = log.count()
     run_plan(service, plan_for(target, Shortcut.parse("ctrl+a")))
-    events = log.wait_for(marker, 2, timeout=10)
+    events = log.wait_for_key(marker, (int(Qt.Key.Key_A),), timeout=15)
     with_control = [
         event for event in events
         if event["kind"] == "key_press"
@@ -428,6 +467,70 @@ def check_mouse(service: AutomationService, target: TargetWindow, log: EventLog,
     report.ok("mouse click arrived at the target", clicked, f"clicked {point}, events: {kinds}")
 
 
+def focus_decoy(decoy_pid: int, decoy_log: EventLog) -> tuple[bool, str]:
+    """Give the decoy keyboard focus, using the platform's own tools.
+
+    Deliberately *not* the product's activation path. This is the harness
+    setting the trap, and it has to work even where the product cannot see the
+    window: on macOS the target and the decoy are both processes named
+    "Python", and pywinctl enumerates the windows of only one of them, so the
+    decoy is raised by process id through System Events instead.
+
+    Success is confirmed by the decoy itself reporting that it took focus,
+    rather than by the exit status of whatever raised it.
+    """
+    marker = decoy_log.count()
+    how = ""
+    if sys.platform == "darwin":
+        script = (
+            'tell application "System Events" to set frontmost of '
+            f"(first process whose unix id is {decoy_pid}) to true"
+        )
+        try:
+            completed = subprocess.run(
+                ["osascript", "-e", script], capture_output=True, text=True, timeout=20
+            )
+            how = f"System Events, pid {decoy_pid}"
+            if completed.returncode != 0:
+                return False, f"{how}: {completed.stderr.strip()}"
+        except Exception as exc:
+            return False, f"System Events failed: {exc}"
+    else:
+        from human_input_automation.adapters.registry import build_adapters as _build
+
+        adapters = _build()
+        try:
+            windows = adapters.discovery
+            if windows is None or adapters.windows is None:
+                return False, "no window discovery on this platform"
+            listed = list(windows.list_windows())
+            candidates = [window for window in listed if window.process_id == decoy_pid]
+            if not candidates:
+                candidates = [
+                    window for window in listed if (window.app_id or "").lower() == DECOY_APP_ID
+                ]
+            if not candidates:
+                seen = "; ".join(
+                    f"{w.title!r} (app={w.app_id!r}, pid={w.process_id})" for w in listed
+                )
+                return False, (
+                    f"the decoy (pid {decoy_pid}) was not enumerated among "
+                    f"{len(listed)} window(s). Saw: {seen or '(nothing)'}"
+                )
+            how = candidates[0].describe()
+            if not adapters.windows.activate(candidates[0]):
+                return False, f"activation refused for {how}"
+        finally:
+            adapters.close()
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if any(event["kind"] == "focus_in" for event in decoy_log.since(marker)):
+            return True, how
+        time.sleep(0.1)
+    return False, f"{how}: the decoy never reported taking focus"
+
+
 def check_activation_against_decoy(service: AutomationService, target: TargetWindow,
                                    log: EventLog, decoy_log: EventLog, decoy_pid: int,
                                    report: Report) -> None:
@@ -435,41 +538,13 @@ def check_activation_against_decoy(service: AutomationService, target: TargetWin
 
     Input must land in the target and nowhere else. This is the single most
     important safety property in the product.
-    """
-    from human_input_automation.adapters.registry import build_adapters as _build
 
-    adapters = _build()
-    decoy = None
-    try:
-        windows = adapters.discovery
-        if windows is None:
-            report.add("focus the decoy window", SKIP, "no window discovery on this platform")
-            return
-        listed = list(windows.list_windows())
-        candidates = [window for window in listed if window.process_id == decoy_pid]
-        if not candidates:
-            candidates = [
-                window for window in listed if (window.app_id or "").lower() == DECOY_APP_ID
-            ]
-        if not candidates:
-            candidates = [window for window in listed if window.title == "Decoy Window"]
-        if not candidates:
-            seen = "; ".join(
-                f"{w.title!r} (app={w.app_id!r}, pid={w.process_id})" for w in listed[:6]
-            )
-            report.add(
-                "focus the decoy window",
-                FAIL,
-                f"the decoy (pid {decoy_pid}) was not enumerated among "
-                f"{len(listed)} window(s). Saw: {seen or '(nothing)'}",
-            )
-            return
-        decoy = candidates[0]
-        activated = adapters.windows.activate(decoy) if adapters.windows else False
-        time.sleep(0.4)
-        report.ok("decoy window can be focused", activated, decoy.describe())
-    finally:
-        adapters.close()
+    The safety assertions run whether or not the decoy could be focused. A
+    harness that cannot set the trap still must not let the run type into the
+    wrong window, and reporting nothing at all here once hid a real defect.
+    """
+    focused, detail = focus_decoy(decoy_pid, decoy_log)
+    report.ok("focus the decoy window", focused, detail)
 
     target_marker = log.count()
     decoy_marker = decoy_log.count()
@@ -485,7 +560,8 @@ def check_activation_against_decoy(service: AutomationService, target: TargetWin
               f"target received {log.typed_text(target_marker)!r}")
     decoy_received = decoy_log.typed_text(decoy_marker)
     report.ok("the decoy received nothing", decoy_received == "",
-              f"decoy received {decoy_received!r}")
+              f"decoy received {decoy_received!r}"
+              + ("" if focused else " (the decoy was not focused, so this is weak evidence)"))
 
 
 def check_emergency_stop(service: AutomationService, target: TargetWindow, log: EventLog,
@@ -630,9 +706,16 @@ def check_profiles(service: AutomationService, target: TargetWindow, log: EventL
     try:
         reloaded = restarted.profiles.load(saved.id)
         report.ok("profile reloads after a restart", reloaded.name == "Verification profile")
-        report.ok("the saved identity is the application, not a handle",
-                  reloaded.target.app_id == TARGET_APP_ID or
-                  reloaded.target.process_name == TARGET_APP_ID,
+        # What matters is that the profile stores an identity that outlives the
+        # handle - not that the identity is spelled the way Linux spells it. On
+        # macOS the durable identity available is the process name, "Python",
+        # while the handle is ("Python", "<window title>") and changes with the
+        # title. The re-resolution checks below prove the property in practice.
+        identity = (reloaded.target.app_id or reloaded.target.process_name or "")
+        durable = bool(identity) and identity != (reloaded.target.handle_hint or "")
+        if sys.platform not in ("darwin", "win32"):
+            durable = identity == TARGET_APP_ID
+        report.ok("the saved identity is the application, not a handle", durable,
                   f"app_id={reloaded.target.app_id!r} handle_hint={reloaded.target.handle_hint!r}")
 
         loaded = restarted.prepare_profile(reloaded)
@@ -685,21 +768,24 @@ def check_global_hotkey(service: AutomationService, target: TargetWindow, report
 
     try:
         # It must not start anything on its own.
-        _press_hotkey()
+        how = _press_hotkey()
         time.sleep(0.5)
-        report.ok("the hotkey does not start a run", not service.is_running)
+        report.ok("the hotkey does not start a run", not service.is_running, f"sent via {how}")
 
         service.start(plan_for(target, Wait(duration_ms=30_000)))
         time.sleep(0.7)
         started = time.monotonic()
-        _press_hotkey()
+        how = _press_hotkey()
         result = service.join(15)
         elapsed = time.monotonic() - started
         report.ok("the hotkey stops a running plan",
                   result is not None and result.status is RunStatus.EMERGENCY_STOPPED,
                   f"{result.summary() if result else 'no report'} after {elapsed * 1000:.0f} ms")
         report.ok("the hotkey callback reached the application", bool(triggered),
-                  f"{len(triggered)} notification(s)")
+                  f"{len(triggered)} notification(s), sent via {how}"
+                  + ("" if triggered or how != "pynput" else
+                     "; pynput ignores its own injected events, so this may be a"
+                     " limitation of the harness rather than of the hotkey"))
     finally:
         service.disable_emergency_hotkey()
         if service.is_running:
@@ -707,17 +793,35 @@ def check_global_hotkey(service: AutomationService, target: TargetWindow, report
             service.join(10)
 
 
-def _press_hotkey() -> None:
-    """Synthesize the configured emergency hotkey with the real input backend."""
+#: macOS virtual key codes for the emergency hotkey. Posting through Quartz
+#: avoids pynput's self-injection filter - see :func:`_press_hotkey`.
+_MACOS_KEY_CODES = {"ctrl": 0x3B, "shift": 0x38, "f9": 0x65}
+
+
+def _press_hotkey() -> str:
+    """Synthesize the configured emergency hotkey. Returns how it was sent.
+
+    pynput tags the events its own Controller injects so that its own Listener
+    ignores them - a sensible guard against a feedback loop, and the reason a
+    pynput-generated hotkey is invisible to a pynput hotkey listener on macOS
+    and Windows. (X11 has no such marker, which is why this worked on Linux.)
+    A real person pressing the keys is unaffected, so the harness posts the
+    events through the platform underneath pynput instead.
+    """
     from human_input_automation.adapters.hotkeys import DEFAULT_EMERGENCY_HOTKEY
+
+    names = [part.strip("<>").strip() for part in DEFAULT_EMERGENCY_HOTKEY.split("+")]
+    names = [name for name in names if name]
+
+    if sys.platform == "darwin":
+        with contextlib.suppress(Exception):
+            _press_hotkey_quartz(names)
+            return "Quartz"
+
     from human_input_automation.adapters.pynput_input import PynputKeyboard
     from human_input_automation.core.keys import normalize_key
 
-    keys = [
-        normalize_key(part.strip("<>"))
-        for part in DEFAULT_EMERGENCY_HOTKEY.split("+")
-        if part.strip()
-    ]
+    keys = [normalize_key(name) for name in names]
     keyboard = PynputKeyboard()
     for key in keys:
         keyboard.key_down(key)
@@ -725,6 +829,42 @@ def _press_hotkey() -> None:
     for key in reversed(keys):
         keyboard.key_up(key)
         time.sleep(0.03)
+    return "pynput"
+
+
+def _press_hotkey_quartz(names: list[str]) -> None:
+    """Post the hotkey as ordinary system key events on macOS."""
+    from Quartz import (
+        CGEventCreateKeyboardEvent,
+        CGEventPost,
+        CGEventSetFlags,
+        kCGEventFlagMaskControl,
+        kCGEventFlagMaskShift,
+        kCGHIDEventTapLocation,
+    )
+
+    codes = [_MACOS_KEY_CODES[name] for name in names]
+    flags = 0
+    if "ctrl" in names:
+        flags |= kCGEventFlagMaskControl
+    if "shift" in names:
+        flags |= kCGEventFlagMaskShift
+
+    def post(code: int, down: bool, with_flags: int) -> None:
+        event = CGEventCreateKeyboardEvent(None, code, down)
+        CGEventSetFlags(event, with_flags)
+        CGEventPost(kCGHIDEventTapLocation, event)
+        time.sleep(0.04)
+
+    held = 0
+    for name, code in zip(names, codes, strict=True):
+        if name == "ctrl":
+            held |= kCGEventFlagMaskControl
+        elif name == "shift":
+            held |= kCGEventFlagMaskShift
+        post(code, True, held if name in ("ctrl", "shift") else flags)
+    for name, code in reversed(list(zip(names, codes, strict=True))):
+        post(code, False, flags if name not in ("ctrl", "shift") else held)
 
 
 def check_adapter_lifecycle(report: Report) -> None:

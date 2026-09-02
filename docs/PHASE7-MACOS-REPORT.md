@@ -206,6 +206,133 @@ is AppleScript — but it no longer blocks the stop.
   logical points, which is what the coordinate space already claims — but it is
   unverified, and a mouse test on that machine is the way to settle it.
 
+## Fourth run: the safety fix confirmed, and the real cost of macOS windows
+
+37 of 49 passed. The headline result is in what the decoy recorded:
+
+```
+{"kind": "ready", "at": ..., "title": "Decoy Window", "pid": 99111, ...}
+```
+
+That is the decoy's entire log. **Nothing reached it.** The defect from the
+third run — automation typing into a window the user had not selected — is
+fixed, and the run that previously produced `DECOY <- 'AUTOMATION_TEST'`
+produced no decoy input at all.
+
+### Every keyboard failure was the harness, not the product
+
+Three checks failed (`tab`, `left`, `ctrl+a`) and all three were false alarms.
+Replaying the recorded log offline settles it:
+
+| key | harness said | the log actually contains |
+| --- | --- | --- |
+| `tab` | received `[]` | `Key_Tab` at +100.46 s |
+| `left` | received `[Key_Tab]` | `Key_Left` at +126.51 s |
+| `ctrl+a` | `2 event(s): [Key_Meta]` | `Key_A` with `MetaModifier` at +229.57 s |
+
+Every key arrived, correctly, with its modifier. The harness waited for a
+*count* of events, so when one slow activation pushed a key past its deadline
+the next check read the stale key and the mismatch walked down the whole list.
+It now waits for the specific key it asked for and lets the log fall quiet
+between checks; replayed against the real recording, all six named keys and the
+chord pass.
+
+### The real defect: a focus probe cost a full desktop enumeration
+
+The timings are the evidence:
+
+* one typing action: **26.5 s**
+* an activation that gave up: **11 s** (against a 4 s budget)
+* emergency stop during activation: **10.8 s**
+
+`is_active()` called `_resolve()`, and `_resolve()` called
+`getAllWindows()` — so *every* focus probe walked every window on the desktop,
+and on macOS every attribute of every window is an Accessibility round trip.
+The bounded, cancellable wait added after the third run was polling with a
+probe slower than its own deadline, which is why activation "failed" on a
+window that was perfectly focusable.
+
+**Fixed**: the adapter remembers the window objects from the last enumeration
+and looks there first. It is a cache of *where to look*, never of the answer —
+the handle and the owning process are re-read from the live window before it is
+used, so a closed, replaced or renamed window falls through to a full search.
+A regression test pins that activation performs no enumeration at all when the
+window is already known, and another pins that a handle whose process has
+changed is refused. macOS also gets a 10 s activation budget rather than 4 s,
+which costs nothing now that the wait is cancellable.
+
+### The hotkey cannot be tested with pynput
+
+Both hotkey checks failed with zero notifications — yet the target window
+recorded the full `Control+Shift+F9` sequence twice, so the keys were
+definitely synthesized.
+
+**pynput tags the events its own `Controller` injects so that its own
+`Listener` ignores them.** That is a sensible guard against feedback loops, and
+it makes a pynput-generated hotkey invisible to a pynput hotkey listener. X11
+has no such marker, which is exactly why this check passed on Linux and fails
+on macOS. A real person pressing the keys is unaffected.
+
+The harness now posts the hotkey through Quartz directly on macOS, underneath
+pynput. **This is a harness limitation, not evidence about the product** — and
+the same caveat applies to Windows, whose pynput backend filters injected
+events too.
+
+### Two windows of the same process name are indistinguishable
+
+The decoy was never enumerated, among nine windows that included two Finder
+windows and two VS Code windows. Multiple windows *per process* enumerate
+fine; the target and the decoy are two separate processes both named `Python`,
+and pywinctl surfaces the windows of only one of them.
+
+This is a genuine macOS limitation worth knowing about — two separately
+launched instances of the same application cannot be told apart — but here it
+only blocked the harness from setting its trap. The decoy is now raised by
+**process id** through System Events, which sidesteps the name collision, and
+the target application reports its own `focus_in` events so the harness can
+confirm the decoy really took focus rather than trusting an exit code. The
+safety assertions also now run whether or not the trap could be set: reporting
+nothing at all there is what hid the original defect.
+
+### Corrected: the saved-identity check
+
+`app_id='Python'` was reported as a failure against a Linux-shaped expectation.
+It is correct macOS behaviour. The check now asserts what actually matters —
+that the profile stores an identity that outlives the handle — and keeps the
+exact-name assertion for Linux. The neighbouring checks already proved the
+property empirically: a stale handle still resolved through the application
+identity, and the reloaded profile ran with its input arriving.
+
+### Still unverified on macOS
+
+* That activation is confirmed **before** input is sent, at the new speed.
+* The decoy-focused activation test end to end.
+* The global hotkey stopping a run, now that it is posted through Quartz.
+* A non-US keyboard layout; a second monitor.
+
+## Fifth finding: the UI refused to start on macOS at all
+
+```
+$ human-input-automation
+Human Input Automation: no graphical display was found
+(DISPLAY and WAYLAND_DISPLAY are both unset)
+```
+
+`DISPLAY` and `WAYLAND_DISPLAY` are an X11 and Wayland convention. macOS draws
+through Quartz and Windows through the desktop window manager, and neither
+advertises itself in the environment, so the check was meaningless off Linux -
+it turned **every** macOS launch into "no graphical display was found". The
+function's own docstring said "Windows and macOS always have one"; the code
+never asked which platform it was on.
+
+The guard is now Linux-only, with regression tests for macOS and Windows. The
+window also asks to be brought to the front at start-up, because a process
+launched from Terminal with no application bundle does not come forward on its
+own and the window can open behind the terminal.
+
+This is the reason no one had run the UI on macOS: only the diagnostics and the
+harness, which never take that path, could start.
+
 ## Environment to record when this is run
 
 ```
@@ -327,19 +454,19 @@ answer; the screen port already declares macOS coordinates as `logical`.
 | Input Monitoring reported separately | **PASS** | probes `available` via `CGPreflightListenEventAccess` |
 | Automation (System Events) prompt appears | NOT TESTED | new in this phase |
 | Window enumeration | **PASS** | 8 windows listed through the real pywinctl adapter |
-| Target activation (decoy focused) | **FAIL, then fixed** | input reached the decoy; fix unverified |
+| Target activation (decoy focused) | **FAIL, fixed, decoy now clean** | the decoy recorded nothing on the next run |
 | Activation failure → zero input | **PASS** | a missing target produced no input |
 | Focus re-verification | NOT TESTED | |
 | Text and Unicode input | **PASS** | typed text arrived at the target |
-| Named keys | **PARTIAL** | enter, backspace, home, page_down passed; tab/left arrived late under slow activation |
+| Named keys | **PASS** | all six arrived; two were miscounted by the harness, confirmed by replay |
 | `META` is Command, not Control (`cmd+a`) | NOT TESTED | release-blocking |
 | Key hold/release cleanup | NOT TESTED | release-blocking |
 | Mouse movement, duration, clicks | **PASS** | landed on the point, took the requested time, click arrived |
 | Retina coordinates (points vs pixels) | **PASS** | logical points; clicks land correctly |
 | Multi-monitor geometry | PARTIAL | single Retina display read correctly; scale reported as 1x (see above) |
 | Keyboard layouts (US + non-US) | NOT TESTED | |
-| Global hotkey `Ctrl+Shift+F9` | **PARTIAL** | registers, does not start a run; stopping a run untested |
-| Emergency stop matrix | **PARTIAL** | stop, cleanup and pause passed; latency was 10.7 s (fixed, unverified) |
+| Global hotkey `Ctrl+Shift+F9` | **PARTIAL** | registers, does not start a run; not testable via pynput (see run four) |
+| Emergency stop matrix | **PARTIAL** | correct behaviour; latency 10.8 s traced to enumeration cost (fixed, unverified) |
 | Profile save/restart/re-resolve | **PASS** | reloaded, re-resolved and ran |
 | Code signing | NOT PERFORMED | no credentials |
 | Notarization | NOT PERFORMED | no credentials |
