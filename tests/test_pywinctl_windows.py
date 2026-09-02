@@ -320,3 +320,70 @@ def test_a_stable_windows_handle_still_takes_the_direct_path() -> None:
     assert target is not None
     assert adapter.activate(target) is True
     assert adapter.is_active(target) is True
+
+
+def counting_module(*windows: Any) -> SimpleNamespace:
+    """A module that records how often the desktop is enumerated."""
+    calls: list[int] = []
+
+    def get_all() -> list[Any]:
+        calls.append(1)
+        return list(windows)
+
+    return SimpleNamespace(getAllWindows=get_all, calls=calls)
+
+
+class SlowlyFocusingWindow(FakeWindow):
+    """Focus arrives only after several probes, as it does on a real desktop."""
+
+    def __init__(self, handle: str, title: str, probes_until_active: int) -> None:
+        super().__init__(handle, title)
+        self._remaining = probes_until_active
+
+    @property
+    def isActive(self) -> bool:
+        if self._remaining > 0:
+            self._remaining -= 1
+            return False
+        return True
+
+    @isActive.setter
+    def isActive(self, value: bool) -> None:  # pragma: no cover - set by the base class
+        pass
+
+
+def test_focus_probes_do_not_re_enumerate_the_desktop() -> None:
+    """Every probe used to enumerate every window, which cost seconds on macOS.
+
+    Measured on a real Mac: one typing action took 26 s and an emergency stop
+    took 10.8 s, because each focus check walked the whole desktop over the
+    Accessibility API.
+    """
+    window = SlowlyFocusingWindow("0x42", "Notepad", probes_until_active=5)
+    fake = counting_module(window)
+    adapter = PyWinCtlWindows(host(), fake)
+    target = adapter.list_windows()[0]
+    fake.calls.clear()
+
+    assert adapter.activate(target) is True
+    assert fake.calls == []
+
+
+def test_a_remembered_window_is_revalidated_before_it_is_used() -> None:
+    """The cache says where to look, never what the answer is."""
+    window = FakeWindow("0x42", "Notepad", pid=100)
+    adapter = PyWinCtlWindows(host(), module(window), activation_timeout=0.1)
+    target = adapter.list_windows()[0]
+
+    # The handle now belongs to a different process: a reused window id.
+    window._pid = 999
+
+    assert adapter.activate(target) is False
+    assert window.activated == 0
+
+
+def test_macos_activation_gets_a_longer_budget_than_other_platforms() -> None:
+    """AppleScript activation is slow; the wait is cancellable, so it can be."""
+    mac = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module())
+    other = PyWinCtlWindows(host(), module())
+    assert mac._activation_timeout > other._activation_timeout

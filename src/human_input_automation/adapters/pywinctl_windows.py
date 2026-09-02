@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 ACTIVATION_TIMEOUT_SECONDS = 4.0
 ACTIVATION_POLL_SECONDS = 0.15
 
+#: macOS activation goes through AppleScript and the window server moves focus
+#: on its own schedule; four seconds was measured to be too short there. The
+#: wait is cancellable, so a longer budget costs nothing when a run is stopped.
+MACOS_ACTIVATION_TIMEOUT_SECONDS = 10.0
+
 
 def import_pywinctl() -> Any:
     """Import pywinctl, turning any failure into an actionable adapter error."""
@@ -58,11 +63,28 @@ class PyWinCtlWindows:
         self,
         host: PlatformReport,
         module: Any | None = None,
-        activation_timeout: float = ACTIVATION_TIMEOUT_SECONDS,
+        activation_timeout: float | None = None,
     ) -> None:
         self._pywinctl = module if module is not None else import_pywinctl()
         self._host = host
-        self._activation_timeout = activation_timeout
+        self._activation_timeout = (
+            activation_timeout if activation_timeout is not None
+            else self._default_timeout(host)
+        )
+        #: Live window objects from the last enumeration, keyed by handle. On
+        #: macOS every attribute of a pywinctl window is an Accessibility round
+        #: trip, so enumerating the desktop to answer "is this window focused?"
+        #: cost seconds per probe; measured, it made a one-action run take 26 s
+        #: and an emergency stop take 10.8 s. The objects are only ever a
+        #: starting point - identity is re-checked against the live window
+        #: before any of them is used.
+        self._known: dict[str, Any] = {}
+
+    @staticmethod
+    def _default_timeout(host: PlatformReport) -> float:
+        if host.platform is PlatformName.MACOS:
+            return MACOS_ACTIVATION_TIMEOUT_SECONDS
+        return ACTIVATION_TIMEOUT_SECONDS
 
     # -- discovery ---------------------------------------------------------
     def list_windows(self) -> Sequence[TargetWindow]:
@@ -75,10 +97,13 @@ class PyWinCtlWindows:
             logger.info("pywinctl window enumeration failed: %s", exc)
             return ()
         targets: list[TargetWindow] = []
+        known: dict[str, Any] = {}
         for window in windows:
             target = self._to_target(window)
             if target is not None and target.title:
                 targets.append(target)
+                known[target.handle] = window
+        self._known = known
         return targets
 
     def find(self, handle: str) -> TargetWindow | None:
@@ -99,8 +124,12 @@ class PyWinCtlWindows:
         """
         if not self._host.capabilities.can_activate:
             return False
+        if cancel is not None and cancel.is_stop_requested():
+            return False
         window = self._resolve(target)
         if window is None:
+            return False
+        if cancel is not None and cancel.is_stop_requested():
             return False
         try:
             window.activate(wait=False)
@@ -170,7 +199,20 @@ class PyWinCtlWindows:
         has gone, fall back to the process behind it, but **only** when exactly
         one window matches: several candidates is ambiguous, and guessing is
         precisely the failure this application must never have.
+
+        The window seen when the desktop was last enumerated is tried first.
+        That is a cache of *where to look*, never of the answer: the handle and
+        the owning process are re-read from the live window before it is
+        accepted, so a window that has closed, been replaced or had its title
+        change falls through to a full search.
         """
+        remembered = self._known.get(target.handle)
+        if remembered is not None:
+            if (self._handle_of(remembered) == target.handle
+                    and self._same_window(target, remembered)):
+                return remembered
+            del self._known[target.handle]
+
         try:
             windows = list(self._pywinctl.getAllWindows())
         except Exception as exc:
@@ -183,6 +225,7 @@ class PyWinCtlWindows:
             if not self._same_window(target, window):
                 logger.info("window %s is no longer the selected target", target.handle)
                 return None
+            self._known[target.handle] = window
             return window
         return self._resolve_by_process(target, windows)
 
