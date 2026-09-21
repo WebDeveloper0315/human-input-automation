@@ -126,23 +126,39 @@ function test() {
 ```
 
 Use **Type into a code editor** instead. It sends the same text one line at a
-time and undoes each of those behaviours as it goes:
+time and works *with* those behaviours rather than against them: an editor that
+has just indented the line and written the closing brace has done part of the
+typing, and the fastest way through is to keep what it wrote.
 
-| Setting | What it does | When to turn it off |
+On the example above that means the indentation is never typed at all — the
+editor's is already right — and the two `}` lines are never typed either: the
+caret walks down onto the braces the editor put there. About a quarter fewer
+keystrokes, and no keystroke spent undoing one of the editor's.
+
+The settings describe **your editor**, and the keystrokes follow from them:
+
+| Setting | Options | Notes |
 | --- | --- | --- |
-| *Indentation: replace what the editor indents* | Selects the indentation the editor just inserted and types over it, so the code arrives exactly as written. | Choose *let the editor indent it* if you would rather have the editor's own layout, or *type as written* for an editor that does nothing on Enter. |
-| *Delete brackets the editor closes* | After a line that leaves a bracket open, presses Delete once per open bracket to remove the partner the editor added. | **Turn this off for an editor that does not close brackets** — the Delete would take a real character instead. |
-| *Press Escape before each new line* | Closes the completion popup, so Enter starts a new line instead of accepting a suggestion. | If you drive an editor where Escape does something else (Vim mode, for instance). |
-| *Select to line start with* | The chord used to select the editor's indentation. `shift+home` works in VS Code everywhere; `meta+shift+left` is the native macOS one. | — |
+| *Indentation* | **Keep the editor's, type the difference** (default) · Replace what the editor indents · Let the editor decide the layout · The editor does not indent | The default usually types nothing at all. Replacing is slower by a chord and an indent on every line, and is the one that assumes nothing — use it if your editor indents in a way this cannot predict. |
+| *Closing brackets* | **Reuse the bracket the editor closes** (default) · Delete it and type my own · The editor closes nothing | **Choose the last one for an editor that does not close brackets** — the other two would press Delete at a character of yours. |
+| *Columns per level* | `0` = read it from the text (default), or 1–16 | Set this to your editor's tab size if it differs from the code you are typing. It decides where the caret lands after a new line. |
+| *Press Escape before each new line* | on by default | Closes the completion popup, so Enter and the arrow keys move the caret instead of accepting a suggestion. Turn it off for an editor where Escape means something else — Vim mode, for instance. |
+| *Select to line start with* | `shift+home` (default) or `meta+shift+left` | Used when the indentation has to be replaced. The second is the native macOS chord. |
 
-None of this can ask the editor what it is about to do; each setting is a
-keystroke that assumes a behaviour. The defaults match VS Code. Run a **dry
-run** and then a real one into a scratch file the first time you point it at a
-new editor.
+Nothing here can ask the editor what it just did, so the defaults are a
+description of VS Code. Run a **dry run** and then a real one into a scratch
+file the first time you point it at a new editor.
+
+If the description is wrong, the text still arrives in full — it is the *shape*
+that goes wrong, and nothing of yours is deleted to get there. Telling it four
+columns when the editor uses two gives you the same code indented in twos.
+Telling it your editor indents after a `:` when it does not gives you a flat
+block. Both are fixed by correcting the setting, or by choosing *replace what
+the editor indents*, which asks the editor for nothing.
 
 Two known limits: a blank line keeps whatever indentation the editor gave it,
-and a line that ends inside an unterminated string can leave one bracket behind.
-Both leave characters in the file rather than removing yours.
+and a line that ends inside an unterminated string can leave one bracket
+behind. Both leave characters in the file rather than removing yours.
 
 ### How much one run may do
 

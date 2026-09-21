@@ -227,6 +227,7 @@ class FakeEditor:
         auto_close: bool = True,
         auto_complete: bool = True,
         indent_unit: str = "    ",
+        indent_after: str = "([{:",
         text: str = "",
     ) -> None:
         self.lines = text.split("\n")
@@ -236,6 +237,9 @@ class FakeEditor:
         self.auto_close = auto_close
         self.auto_complete = auto_complete
         self.indent_unit = indent_unit
+        #: What makes it indent the next line. VS Code indents after an opening
+        #: bracket in the C family and after a colon in Python.
+        self.indent_after = indent_after
         self.anchor: tuple[int, int] | None = None
         self.held: set[KeyLike] = set()
         #: Closers the editor inserted, innermost last, sitting right of the caret.
@@ -289,6 +293,12 @@ class FakeEditor:
             self._home()
         elif key is Key.END:
             self._move(self.row, len(self.line))
+        elif key is Key.DOWN:
+            row = min(len(self.lines) - 1, self.row + 1)
+            self._move(row, min(self.col, len(self.lines[row])))
+        elif key is Key.UP:
+            row = max(0, self.row - 1)
+            self._move(row, min(self.col, len(self.lines[row])))
         elif key is Key.LEFT:
             self._move(self.row, max(0, self.col - 1))
         elif key is Key.RIGHT:
@@ -348,7 +358,8 @@ class FakeEditor:
         before, after = self.line[: self.col], self.line[self.col :]
         indent = before[: len(before) - len(before.lstrip())] if self.auto_indent else ""
         opener = before.rstrip()[-1:] if self.auto_indent else ""
-        deeper = indent + self.indent_unit if opener in _CLOSERS and opener else indent
+        opens_block = bool(opener) and opener in self.indent_after
+        deeper = indent + self.indent_unit if opens_block else indent
 
         self.lines[self.row] = before
         if opener in _CLOSERS and opener and after[:1] == _CLOSERS[opener]:

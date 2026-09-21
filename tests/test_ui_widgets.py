@@ -302,18 +302,24 @@ def test_action_dialog_delay_defaults_to_the_timing_profile() -> None:
 
 
 def test_action_dialog_edits_a_code_typing_action() -> None:
-    from human_input_automation.core.actions import IndentMode, TypeCode
-    from human_input_automation.ui.models import INDENT_LABELS
+    from human_input_automation.core.actions import IndentMode, PairMode, TypeCode
+    from human_input_automation.ui.models import INDENT_LABELS, PAIR_LABELS
 
     dialog = ActionDialog(kind="type_code")
     assert set(dialog.values()) == {
-        "text", "indent", "drop_auto_pairs", "dismiss_suggestions", "line_start_chord"
+        "text",
+        "indent",
+        "pairs",
+        "indent_width",
+        "dismiss_suggestions",
+        "line_start_chord",
     }
     dialog.set_values(
         {
             "text": "if (x) {\n    y();\n}",
             "indent": INDENT_LABELS[IndentMode.EDITOR],
-            "drop_auto_pairs": False,
+            "pairs": PAIR_LABELS[PairMode.DELETE],
+            "indent_width": 2,
             "dismiss_suggestions": True,
             "line_start_chord": "meta+shift+left",
         }
@@ -322,7 +328,8 @@ def test_action_dialog_edits_a_code_typing_action() -> None:
     assert action == TypeCode(
         text="if (x) {\n    y();\n}",
         indent=IndentMode.EDITOR,
-        drop_auto_pairs=False,
+        pairs=PairMode.DELETE,
+        indent_width=2,
         line_start_chord="meta+shift+left",
     )
     assert ActionDialog(action=action).try_build() == action

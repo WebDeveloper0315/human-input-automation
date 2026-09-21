@@ -8,8 +8,6 @@ what a caller extends to add new action types.
 from __future__ import annotations
 
 from .actions import (
-    AUTO_CLOSED_PAIRS,
-    IndentMode,
     KeyDown,
     KeyPress,
     KeyUp,
@@ -22,6 +20,7 @@ from .actions import (
     TypeText,
     Wait,
 )
+from .editor_typing import Emit, Press, plan_code_typing
 from .engine import ActionRegistry, ExecutionContext
 from .errors import UnsupportedActionError
 from .keys import Key, KeyLike, parse_shortcut
@@ -45,87 +44,19 @@ def handle_type_text(action: TypeText, ctx: ExecutionContext) -> None:
 def handle_type_code(action: TypeCode, ctx: ExecutionContext) -> None:
     """Type text into an editor that indents, closes brackets and completes.
 
-    One line at a time, because every compensation is a per-line one: the
-    editor's indentation is only there to be replaced just after a newline, and
-    the brackets it closed for us are only reachable while the caret is still on
-    the line that opened them.
+    Every decision was made by :func:`~.editor_typing.plan_code_typing`, which
+    is a pure function of the text and the editor's behaviour; this only
+    performs what it planned, so the interesting part stays testable without a
+    keyboard anywhere near it.
     """
-    lines = action.lines
-    for index, line in enumerate(lines):
-        if index:
-            _tap(ctx, Key.ENTER)
-
-        body = line.lstrip() if action.indent is IndentMode.EDITOR else line
-        # Reclaiming means selecting the indentation the editor inserted when
-        # *we* pressed Enter, so it only ever applies from the second line on.
-        # On the first line the caret is wherever the user left it, and there
-        # the same chord would select whatever is already on that line and type
-        # over it - losing text the plan never mentioned.
-        #
-        # A line that is only the editor's indentation is skipped too: there is
-        # nothing to type over it with, and the next Enter clears it anyway.
-        if index and action.indent is IndentMode.RECLAIM and body.strip():
-            _chord(ctx, action.line_start_chord)
-
-        if body:
-            _type_string(body, ctx)
-
-        if action.drop_auto_pairs:
-            for _ in range(unclosed_pairs(body)):
-                _tap(ctx, Key.DELETE)
-        if action.dismiss_suggestions:
-            _tap(ctx, Key.ESC)
-
-
-#: Where an editor stops closing brackets for you: inside a string, and after a
-#: comment marker. Both are conventions rather than rules, which is why counting
-#: too few is the failure this scanner is built to prefer - see below.
-_QUOTES = "\"'`"
-_LINE_COMMENTS = ("//", "#")
-
-
-def unclosed_pairs(line: str) -> int:
-    """How many brackets ``line`` opens and leaves open.
-
-    That is how many closing brackets an editor has left sitting to the right of
-    the caret at the end of the line: the ones we close ourselves are typed over
-    as we go, and only the outstanding ones survive.
-
-    Brackets inside a string or a trailing comment are skipped, because an
-    editor configured by language does not close those either. Where the guess
-    is wrong it is wrong downwards: an unterminated quote stops the scan, so the
-    count comes out too low and a bracket is left behind, rather than too high -
-    which would spend a Delete press on a character belonging to the user.
-    """
-    stack: list[str] = []
-    index = 0
-    while index < len(line):
-        char = line[index]
-        if char in _QUOTES:
-            index = _skip_string(line, index)
-            continue
-        if any(line.startswith(marker, index) for marker in _LINE_COMMENTS):
-            break
-        if char in AUTO_CLOSED_PAIRS:
-            stack.append(char)
-        elif stack and char == AUTO_CLOSED_PAIRS[stack[-1]]:
-            stack.pop()
-        index += 1
-    return len(stack)
-
-
-def _skip_string(line: str, start: int) -> int:
-    """Index just past the string starting at ``start``, or the end of the line."""
-    quote = line[start]
-    index = start + 1
-    while index < len(line):
-        if line[index] == "\\":
-            index += 2
-            continue
-        if line[index] == quote:
-            return index + 1
-        index += 1
-    return len(line)
+    for step in plan_code_typing(action):
+        if isinstance(step, Emit):
+            _type_string(step.text, ctx)
+        elif isinstance(step, Press):
+            for _ in range(step.count):
+                _tap(ctx, step.key)
+        else:
+            _chord(ctx, step.shortcut)
 
 
 def _type_string(text: str, ctx: ExecutionContext) -> None:

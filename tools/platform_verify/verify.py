@@ -47,11 +47,13 @@ from human_input_automation.adapters.registry import build_adapters  # noqa: E40
 from human_input_automation.application.profiles import ProfileState  # noqa: E402
 from human_input_automation.application.service import AutomationService  # noqa: E402
 from human_input_automation.core.actions import (  # noqa: E402
+    IndentMode,
     KeyDown,
     KeyPress,
     MouseClick,
     MouseDown,
     MouseMove,
+    PairMode,
     Shortcut,
     TypeCode,
     TypeText,
@@ -360,13 +362,17 @@ def check_code_typing(service: AutomationService, target: TargetWindow, log: Eve
                       report: Report) -> None:
     """A block of code must arrive as that block of code.
 
-    The target is a plain text box, not a code editor, so none of the
-    compensations have anything to compensate for here. That is the point: this
-    proves the extra keystrokes (Escape, Delete, shift+Home) really are sent
-    through the adapter and really are harmless where the editor is not
-    helping. Whether they cancel out VS Code's own behaviour is a separate
-    question, checked against the editor model in ``tests/test_editor_typing.py``
-    and, ultimately, by typing into VS Code itself.
+    The target is a plain text box: it does not indent, close brackets or
+    complete anything, and the action is told so. That is the honest setting
+    here, and it proves the text itself survives a real adapter, a real window
+    and a real X server.
+
+    The second half sends the settings meant for a real code editor and checks
+    that the keys they add - Escape, and the arrow walk onto a closing bracket -
+    actually arrive. It deliberately does not check the text those produce: in
+    a box that indents nothing there is nothing for them to reuse. Whether they
+    cancel out VS Code's own behaviour is checked against the editor model in
+    ``tests/test_editor_typing.py`` and, ultimately, by typing into VS Code.
     """
     from PySide6.QtCore import Qt
 
@@ -378,7 +384,7 @@ def check_code_typing(service: AutomationService, target: TargetWindow, log: Eve
         target,
         Shortcut.parse(select_all),
         KeyPress(key="delete"),
-        TypeCode(text=CODE_SNIPPET),
+        TypeCode(text=CODE_SNIPPET, indent=IndentMode.OFF, pairs=PairMode.OFF),
         KeyPress(key="f8"),
     ))
     if result is None:
@@ -398,15 +404,22 @@ def check_code_typing(service: AutomationService, target: TargetWindow, log: Eve
               received == CODE_SNIPPET,
               f"expected {CODE_SNIPPET!r}, received {received!r}")
 
-    pressed = {event.get("key") for event in events if event["kind"] == "key_press"}
+    # Now the settings a real code editor gets, for the keys they add.
+    log.settle()
+    marker = log.count()
+    run_plan(service, plan_for(target, TypeCode(text=CODE_SNIPPET)))
+    log.settle()
+    pressed = {
+        event.get("key") for event in log.since(marker) if event["kind"] == "key_press"
+    }
     expected = {
         "escape": int(Qt.Key.Key_Escape),
-        "delete": int(Qt.Key.Key_Delete),
-        "home": int(Qt.Key.Key_Home),
+        "down": int(Qt.Key.Key_Down),
+        "end": int(Qt.Key.Key_End),
     }
     missing = [name for name, code in expected.items() if code not in pressed]
-    report.ok("the editor compensations were sent as real keys", not missing,
-              f"missing: {', '.join(missing)}" if missing else "escape, delete and home arrived")
+    report.ok("the keys an editor-aware run adds all arrive", not missing,
+              f"missing: {', '.join(missing)}" if missing else "escape, down and end arrived")
 
 
 def check_typing_mistakes(service: AutomationService, target: TargetWindow, log: EventLog,

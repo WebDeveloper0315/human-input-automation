@@ -25,6 +25,7 @@ from human_input_automation.application.profiles import (
     new_profile_id,
     profile_to_dict,
 )
+from human_input_automation.application.profiles.schema import SCHEMA_VERSION
 from human_input_automation.core.actions import TypeText, Wait
 from human_input_automation.core.plan import AutomationPlan
 from human_input_automation.core.target import PlatformName
@@ -274,6 +275,6 @@ def test_the_default_directory_is_not_inside_the_source_tree() -> None:
 def test_a_json_file_on_disk_is_human_readable(repository: ProfileRepository) -> None:
     saved = repository.save(make_profile("Readable"))
     text = (repository.directory / f"{saved.id}.json").read_text(encoding="utf-8")
-    assert '"schema": 1' in text
+    assert f'"schema": {SCHEMA_VERSION}' in text
     assert '"name": "Readable"' in text
     assert json.loads(text) == profile_to_dict(saved)

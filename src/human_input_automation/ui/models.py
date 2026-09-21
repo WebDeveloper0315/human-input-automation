@@ -30,6 +30,7 @@ from ..core.actions import (
     MouseDown,
     MouseMove,
     MouseUp,
+    PairMode,
     Shortcut,
     TypeCode,
     TypeText,
@@ -661,14 +662,22 @@ def _build_type_text(values: Mapping[str, Any], delay: float | None) -> Action:
     return TypeText(text=str(values.get("text", "")), delay_after_ms=delay)
 
 
-#: Readable names for the indentation modes. The stored value stays the short
-#: enum member, so the file format does not carry a label the UI may reword.
+#: Readable names for the editor modes. The stored value stays the short enum
+#: member, so the file format does not carry a label the UI may reword.
 INDENT_LABELS: dict[IndentMode, str] = {
+    IndentMode.MATCH: "Keep the editor's, type the difference",
     IndentMode.RECLAIM: "Replace what the editor indents",
-    IndentMode.EDITOR: "Let the editor indent it",
-    IndentMode.OFF: "Type the indentation as written",
+    IndentMode.EDITOR: "Let the editor decide the layout",
+    IndentMode.OFF: "The editor does not indent",
 }
 _INDENT_BY_LABEL = {label: mode for mode, label in INDENT_LABELS.items()}
+
+PAIR_LABELS: dict[PairMode, str] = {
+    PairMode.REUSE: "Reuse the bracket the editor closes",
+    PairMode.DELETE: "Delete it and type my own",
+    PairMode.OFF: "The editor closes nothing",
+}
+_PAIRS_BY_LABEL = {label: mode for mode, label in PAIR_LABELS.items()}
 
 #: Chords that select from the caret to the start of the line. The first works
 #: in VS Code on every platform; the second is what a native macOS editor wants.
@@ -676,11 +685,13 @@ LINE_START_CHORDS: tuple[str, ...] = (DEFAULT_LINE_START_CHORD, "meta+shift+left
 
 
 def _build_type_code(values: Mapping[str, Any], delay: float | None) -> Action:
-    indent = values.get("indent", INDENT_LABELS[IndentMode.RECLAIM])
+    indent = str(values.get("indent", INDENT_LABELS[IndentMode.MATCH]))
+    pairs = str(values.get("pairs", PAIR_LABELS[PairMode.REUSE]))
     return TypeCode(
         text=str(values.get("text", "")),
-        indent=_INDENT_BY_LABEL.get(str(indent), IndentMode.RECLAIM),
-        drop_auto_pairs=bool(values.get("drop_auto_pairs", True)),
+        indent=_INDENT_BY_LABEL.get(indent, IndentMode.MATCH),
+        pairs=_PAIRS_BY_LABEL.get(pairs, PairMode.REUSE),
+        indent_width=int(values.get("indent_width", 0) or 0),
         dismiss_suggestions=bool(values.get("dismiss_suggestions", True)),
         line_start_chord=str(values.get("line_start_chord") or DEFAULT_LINE_START_CHORD),
         delay_after_ms=delay,
@@ -692,7 +703,8 @@ def _type_code_values(action: Action) -> dict[str, Any]:
     return {
         "text": action.text,
         "indent": INDENT_LABELS[action.indent],
-        "drop_auto_pairs": action.drop_auto_pairs,
+        "pairs": PAIR_LABELS[action.pairs],
+        "indent_width": action.indent_width,
         "dismiss_suggestions": action.dismiss_suggestions,
         "line_start_chord": action.line_start_chord,
     }
@@ -786,21 +798,37 @@ ACTION_SPECS: tuple[ActionSpec, ...] = (
                 "indent",
                 "Indentation",
                 FieldKind.CHOICE,
-                default=INDENT_LABELS[IndentMode.RECLAIM],
+                default=INDENT_LABELS[IndentMode.MATCH],
                 choices=tuple(INDENT_LABELS.values()),
                 help_text=(
-                    "An editor indents each new line for you. Replacing that keeps the code "
-                    "exactly as written; leaving it lets the editor decide the layout."
+                    "An editor indents each new line for you. Keeping that and typing only "
+                    "the difference is fastest and usually types nothing at all; replacing it "
+                    "is slower but assumes nothing about what the editor did."
                 ),
             ),
             FieldSpec(
-                "drop_auto_pairs",
-                "Delete brackets the editor closes",
-                FieldKind.BOOL,
-                default=True,
+                "pairs",
+                "Closing brackets",
+                FieldKind.CHOICE,
+                default=PAIR_LABELS[PairMode.REUSE],
+                choices=tuple(PAIR_LABELS.values()),
                 help_text=(
-                    "Assumes the editor closes brackets for you, as VS Code does. Turn it off "
-                    "for an editor that does not: the Delete would take a real character."
+                    "An editor that closes a bracket for you has already written the line "
+                    "you were going to type. Reusing walks down onto it. Choose the last "
+                    "option for an editor that closes nothing: the others would press Delete "
+                    "at a character of yours."
+                ),
+            ),
+            FieldSpec(
+                "indent_width",
+                "Columns per level",
+                FieldKind.INT,
+                default=0,
+                minimum=0,
+                maximum=16,
+                help_text=(
+                    "0 reads it from the text. Set it to your editor's tab size when they "
+                    "differ - it decides where the caret lands after a new line."
                 ),
             ),
             FieldSpec(

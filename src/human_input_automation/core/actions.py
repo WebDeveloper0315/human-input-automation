@@ -84,13 +84,35 @@ class IndentMode(StrEnum):
     what turns a tidy block of code into a staircase.
     """
 
-    #: Select the editor's indentation and type over it. The text comes out
-    #: exactly as written.
+    #: Keep what the editor inserted and type only the difference - usually
+    #: nothing at all, because the editor's guess and the source agree. Needs a
+    #: working idea of how wide one level is; see ``TypeCode.indent_width``.
+    MATCH = "match"
+    #: Select the editor's indentation and type over it. Slower by a chord and
+    #: an indent on every line, and assumes nothing about what the editor did.
     RECLAIM = "reclaim"
     #: Drop our own leading whitespace and keep the editor's. The editor decides
     #: the layout, which is what a person gets when they type the code by hand.
     EDITOR = "editor"
     #: Send the text unchanged, editor helpfulness and all.
+    OFF = "off"
+
+
+class PairMode(StrEnum):
+    """What to do about the closing bracket an editor writes for you.
+
+    Typing ``{`` and pressing Enter leaves the matching ``}`` on a line of its
+    own below the caret. It is already the character the source asks for, in
+    the place the source asks for it.
+    """
+
+    #: Walk down onto that line when the source agrees with it, and delete the
+    #: brackets the source never closes. Fewest keystrokes, and what a person
+    #: does.
+    REUSE = "reuse"
+    #: Delete every bracket the editor adds and type our own.
+    DELETE = "delete"
+    #: The editor closes nothing, so there is nothing to reuse or remove.
     OFF = "off"
 
 
@@ -112,42 +134,54 @@ class TypeCode(TextAction):
     multiplied, extra closing brackets at the end, and the occasional accepted
     suggestion in the middle.
 
-    This action sends the same text with each of those behaviours compensated
-    for. Every compensation is a keystroke - there is no way to ask an editor
-    what it is about to do - so each one states the assumption it makes, and can
-    be turned off when it does not hold:
+    This action sends the same text and works *with* those behaviours instead
+    of against them: an editor that indents the new line and closes the bracket
+    has done part of the typing, and the cheapest way through it is to keep
+    what it wrote. The settings describe the editor rather than a strategy, and
+    the keystrokes follow from them:
 
-    * ``indent`` - see :class:`IndentMode`. Reclaiming assumes the chord in
-      ``line_start_chord`` selects to the start of the line.
-    * ``drop_auto_pairs`` - after a line that leaves a bracket open, press
-      Delete once per open bracket to remove the partner the editor added.
-      **Assumes the editor closes brackets.** Where it does not, those presses
-      delete real characters to the right of the caret, so switch this off for
-      an editor that leaves brackets alone.
-    * ``dismiss_suggestions`` - press Escape at the end of every line, so the
-      Enter that follows inserts a newline rather than accepting whatever the
-      completion popup was offering.
+    * ``indent`` - see :class:`IndentMode`. The default keeps the editor's
+      indentation and types only the difference.
+    * ``pairs`` - see :class:`PairMode`. The default walks down onto the
+      closing bracket the editor wrote and deletes only the ones the source
+      never closes. **Both of those assume the editor closes brackets**; for
+      one that does not, ``OFF`` stops it pressing Delete at a character that
+      belongs to the user.
+    * ``indent_width`` - how many columns one level is, 0 to read it from the
+      text. It has to match the editor's own tab size, because that is what
+      decides where the caret lands after an Enter.
+    * ``dismiss_suggestions`` - press Escape before leaving every line, so the
+      Enter or the arrow that follows moves the caret rather than accepting
+      whatever the completion popup was offering.
 
     A blank line keeps whatever indentation the editor gave it: clearing it
     would mean pressing Delete or Backspace with nothing selected, which in an
     editor joins two lines together.
 
-    Reclaiming starts at the second line. The first one is typed where the
-    caret already is, and there is no indentation of the editor's there to
-    reclaim - only, possibly, text of the user's that selecting to the start of
-    the line would replace.
+    The indentation work starts at the second line. The first one is typed
+    where the caret already is, and there is no indentation of the editor's
+    there to reconcile - only, possibly, text of the user's that a chord to the
+    start of the line would select and replace.
     """
 
     kind: ClassVar[str] = "type_code"
 
-    indent: IndentMode = IndentMode.RECLAIM
-    drop_auto_pairs: bool = True
+    indent: IndentMode = IndentMode.MATCH
+    pairs: PairMode = PairMode.REUSE
+    indent_width: int = 0
     dismiss_suggestions: bool = True
     line_start_chord: str = DEFAULT_LINE_START_CHORD
 
     def __post_init__(self) -> None:
         super().__post_init__()
         object.__setattr__(self, "indent", IndentMode(self.indent))
+        object.__setattr__(self, "pairs", PairMode(self.pairs))
+        _require(
+            0 <= self.indent_width <= 16,
+            "type_code.indent_width",
+            f"indent_width must be between 0 (read it from the text) and 16, "
+            f"got {self.indent_width}",
+        )
         # Parsed now so a chord that cannot be sent is a validation error in the
         # editor, not a surprise in the middle of a run.
         parse_shortcut(self.line_start_chord, location="line_start_chord")
@@ -163,31 +197,31 @@ class TypeCode(TextAction):
 
         A platform whose backend lacks one of these has to be caught before the
         run starts, in the same way as a key press that names it directly.
+        Listed by what the settings allow, not by what this particular text
+        turns out to need.
         """
         keys: list[KeyLike] = []
         if len(self.lines) > 1:
             keys.append(Key.ENTER)
-        if self.indent is IndentMode.RECLAIM:
+        if self.indent in (IndentMode.MATCH, IndentMode.RECLAIM):
             keys.extend(parse_shortcut(self.line_start_chord))
-        if self.drop_auto_pairs:
+        if self.pairs is not PairMode.OFF:
             keys.append(Key.DELETE)
+        if self.pairs is PairMode.REUSE:
+            keys.extend((Key.DOWN, Key.END))
         if self.dismiss_suggestions:
             keys.append(Key.ESC)
         return tuple(dict.fromkeys(keys))
 
     def describe(self) -> str:
         count = len(self.lines)
-        compensations = [
-            name
-            for name, enabled in (
-                (f"indent: {self.indent.value}", self.indent is not IndentMode.OFF),
-                ("drop auto-pairs", self.drop_auto_pairs),
-                ("dismiss suggestions", self.dismiss_suggestions),
-            )
-            if enabled
-        ]
-        suffix = f" [{', '.join(compensations)}]" if compensations else ""
-        return f"type {count} line(s) into an editor ({len(self.text)} chars){suffix}"
+        settings = [f"indent: {self.indent.value}", f"pairs: {self.pairs.value}"]
+        if self.dismiss_suggestions:
+            settings.append("dismiss suggestions")
+        return (
+            f"type {count} line(s) into an editor ({len(self.text)} chars) "
+            f"[{', '.join(settings)}]"
+        )
 
 
 @dataclass(frozen=True)
@@ -429,6 +463,7 @@ __all__ = [
     "MouseDown",
     "MouseMove",
     "MouseUp",
+    "PairMode",
     "Shortcut",
     "TextAction",
     "TypeCode",

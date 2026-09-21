@@ -38,6 +38,7 @@ from ...core.actions import (
     MouseDown,
     MouseMove,
     MouseUp,
+    PairMode,
     Shortcut,
     TypeCode,
     TypeText,
@@ -177,7 +178,7 @@ def _key(value: Any, location: str) -> KeyLike:
 
 
 def _encode_value(value: Any, location: str) -> Any:
-    if isinstance(value, (Key, MouseButton, IndentMode)):
+    if isinstance(value, (Key, MouseButton, IndentMode, PairMode)):
         return value.value
     if isinstance(value, (str, bool, int, float)) or value is None:
         if isinstance(value, float) and not math.isfinite(value):
@@ -209,9 +210,8 @@ def _decode_type_code(data: Mapping[str, Any], location: str, delay: float | Non
     return TypeCode(
         text=_string(data, "text", location),
         indent=_enum(IndentMode, data.get("indent"), "indent", location, defaults.indent),
-        drop_auto_pairs=_bool(
-            data, "drop_auto_pairs", location, default=defaults.drop_auto_pairs
-        ),
+        pairs=_enum(PairMode, data.get("pairs"), "pairs", location, defaults.pairs),
+        indent_width=_int(data, "indent_width", location, default=defaults.indent_width),
         dismiss_suggestions=_bool(
             data, "dismiss_suggestions", location, default=defaults.dismiss_suggestions
         ),
@@ -549,10 +549,50 @@ def plan_from_dict(
 # Profiles and migration
 # ---------------------------------------------------------------------------
 
-#: ``from_version -> upgrade function``. Empty while only version 1 exists; the
-#: mechanism is here so a future version 2 needs one entry, not a change at
-#: every call site.
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+def _upgrade_1_to_2(data: dict[str, Any]) -> dict[str, Any]:
+    """Schema 1 -> 2: ``type_code`` describes the editor, not a strategy.
+
+    Version 1 had ``drop_auto_pairs``, a boolean that meant "delete the bracket
+    the editor closed for me". What it really recorded was a fact - *this
+    editor closes brackets* - and version 2 keeps that fact while leaving the
+    strategy to the planner, which now walks onto those brackets rather than
+    deleting them. ``false`` said the opposite, that nothing is closed, so it
+    becomes ``off``.
+
+    ``reclaim`` becomes ``match`` for the same reason: it was the only way to
+    end up with the text as written, not a preference for typing over the
+    editor's indentation. ``reclaim`` remains available for anyone who wants
+    it.
+    """
+    upgraded = dict(data)
+    plan = upgraded.get("plan")
+    if isinstance(plan, Mapping):
+        actions = plan.get("actions")
+        if isinstance(actions, list):
+            upgraded["plan"] = {
+                **plan,
+                "actions": [_upgrade_action_1_to_2(action) for action in actions],
+            }
+    upgraded["schema"] = 2
+    return upgraded
+
+
+def _upgrade_action_1_to_2(action: Any) -> Any:
+    if not isinstance(action, Mapping) or action.get("type") != TypeCode.kind:
+        return action
+    upgraded = dict(action)
+    closes_brackets = upgraded.pop("drop_auto_pairs", True)
+    upgraded.setdefault(
+        "pairs", PairMode.REUSE.value if closes_brackets is not False else PairMode.OFF.value
+    )
+    if upgraded.get("indent") == IndentMode.RECLAIM.value:
+        upgraded["indent"] = IndentMode.MATCH.value
+    return upgraded
+
+
+#: ``from_version -> upgrade function``. One entry per version step; a profile
+#: two versions old is walked forward one step at a time.
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _upgrade_1_to_2}
 
 
 def migrate(
