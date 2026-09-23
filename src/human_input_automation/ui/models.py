@@ -54,6 +54,7 @@ from ..core.events import (
     TargetActivated,
 )
 from ..core.keys import MouseButton, normalize_key, parse_shortcut
+from ..core.screen import ScreenGeometry
 from ..core.target import PlatformName, PlatformReport, TargetWindow
 from ..core.timing import TimingProfile, TimingService
 from ..core.typing_style import TypingStyle
@@ -610,6 +611,55 @@ def profile_choices(summaries: Sequence[object]) -> list[tuple[str, str]]:
         readable = bool(getattr(summary, "is_readable", True))
         choices.append((identifier, name if readable else f"{name} (unreadable)"))
     return choices
+
+
+# ---------------------------------------------------------------------------
+# Screen positions
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PointerSource:
+    """How the action editor reads the desktop while picking a position.
+
+    Injected rather than imported so the widgets stay free of adapters: the
+    application layer knows which port can answer, and the dialog only knows
+    that something can.
+    """
+
+    #: The pointer's position, or ``None`` when this host cannot report it.
+    position: Callable[[], tuple[int, int] | None]
+    #: The monitor layout, used to say where a captured point landed.
+    geometry: Callable[[], ScreenGeometry] = ScreenGeometry.unknown
+
+    @property
+    def can_read_pointer(self) -> bool:
+        return self.position() is not None
+
+
+def position_readout(
+    value: tuple[int, int] | None,
+    *,
+    relative: bool = False,
+    screen: ScreenGeometry | None = None,
+) -> str:
+    """The line beside the picker: what was captured, and where it lands.
+
+    Naming the monitor is worth the space on a multi-monitor desktop, where a
+    plausible-looking pair of numbers can still be on the wrong screen - and
+    where a point on no monitor at all is a plan that will fail validation.
+    """
+    if value is None:
+        return "Not set - drag, or type the numbers."
+    x, y = value
+    if relative:
+        return f"by ({x:+d}, {y:+d}) from wherever the pointer starts"
+    if screen is None or not screen.is_known:
+        return f"({x}, {y})"
+    monitor = screen.monitor_at(x, y)
+    if monitor is None:
+        return f"({x}, {y}) - not on any monitor"
+    return f"({x}, {y}) on {monitor.name}"
 
 
 # ---------------------------------------------------------------------------

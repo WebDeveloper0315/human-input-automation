@@ -33,13 +33,16 @@ from .models import (
     ActionSpec,
     FieldKind,
     FieldSpec,
+    PointerSource,
     action_error_message,
     action_row_text,
     action_to_values,
     build_action,
+    position_readout,
     spec_for_action,
     spec_for_kind,
 )
+from .position_picker import PositionPicker
 
 #: Spin-box value meaning "use the timing profile's action delay".
 _USE_PROFILE = -1.0
@@ -52,16 +55,24 @@ class ActionDialog(QDialog):
     new action type to ``ui.models`` gives it an editor for free.
     """
 
+    #: Window opacity while a position is being dragged, so the point being
+    #: aimed at is not hidden behind this dialog.
+    DRAGGING_OPACITY = 0.3
+
     def __init__(
         self,
         kind: str | None = None,
         action: Action | None = None,
         parent: QWidget | None = None,
+        pointer: PointerSource | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Edit action" if action is not None else "Add action")
         self._editors: dict[str, QWidget] = {}
         self._action: Action | None = None
+        self._pointer = pointer
+        self.picker: PositionPicker | None = None
+        self.position_label: QLabel | None = None
 
         spec = spec_for_action(action) if action is not None else None
         self._kind = spec.kind if spec is not None else (kind or ACTION_SPECS[0].kind)
@@ -194,6 +205,8 @@ class ActionDialog(QDialog):
         while self.form.rowCount():
             self.form.removeRow(0)
         self._editors.clear()
+        self.picker = None
+        self.position_label = None
         spec: ActionSpec = spec_for_kind(self.kind)
         for field in spec.fields:
             editor = self._make_editor(field)
@@ -202,6 +215,72 @@ class ActionDialog(QDialog):
             if field.help_text:
                 editor.setToolTip(field.help_text)
             editor.setAccessibleName(field.label)
+        if {"x", "y"} <= set(self._editors):
+            self._add_position_picker()
+
+    # -- picking a position ------------------------------------------------
+    def _add_position_picker(self) -> None:
+        """Offer to capture the coordinates instead of having them typed.
+
+        Added wherever an action has an x and a y, so a new action that takes a
+        screen position gets this for free.
+        """
+        reader = self._pointer.position if self._pointer is not None else None
+        self.picker = PositionPicker(reader)
+        self.picker.picked.connect(self._on_position_picked)
+        self.picker.moved.connect(self._on_position_moved)
+        self.picker.drag_started.connect(
+            lambda: self.window().setWindowOpacity(self.DRAGGING_OPACITY)
+        )
+        self.picker.drag_finished.connect(lambda: self.window().setWindowOpacity(1.0))
+
+        self.position_label = QLabel(position_readout(None))
+        self.position_label.setWordWrap(True)
+        self.position_label.setAccessibleName("Captured position")
+
+        row = QVBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.picker)
+        row.addWidget(self.position_label)
+        holder = QWidget()
+        holder.setLayout(row)
+        self.form.addRow("Capture", holder)
+
+        relative = self._editors.get("relative")
+        if isinstance(relative, QCheckBox):
+            relative.toggled.connect(self.picker.set_relative)
+            self.picker.set_relative(relative.isChecked())
+        self._show_position(self._current_position())
+
+    def _on_position_picked(self, x: int, y: int) -> None:
+        for name, value in (("x", x), ("y", y)):
+            editor = self._editors.get(name)
+            if isinstance(editor, QSpinBox):
+                editor.setValue(value)
+        # A captured position the action would then ignore is a trap; ticking
+        # the box is what the user meant by capturing one.
+        use_position = self._editors.get("use_position")
+        if isinstance(use_position, QCheckBox):
+            use_position.setChecked(True)
+        self._show_position((x, y))
+
+    def _on_position_moved(self, x: int, y: int) -> None:
+        self._show_position((x, y))
+
+    def _current_position(self) -> tuple[int, int] | None:
+        x, y = self._editors.get("x"), self._editors.get("y")
+        if isinstance(x, QSpinBox) and isinstance(y, QSpinBox):
+            return (x.value(), y.value())
+        return None
+
+    def _show_position(self, value: tuple[int, int] | None) -> None:
+        if self.position_label is None:
+            return
+        screen = self._pointer.geometry() if self._pointer is not None else None
+        relative = self.picker is not None and self.picker.relative
+        self.position_label.setText(
+            position_readout(value, relative=relative, screen=screen)
+        )
 
     def _make_editor(self, field: FieldSpec) -> QWidget:
         if field.kind is FieldKind.MULTILINE:
@@ -258,6 +337,7 @@ class ActionEditor(QGroupBox):
     def __init__(self) -> None:
         super().__init__("Actions")
         self._actions: list[Action] = []
+        self._pointer: PointerSource | None = None
 
         layout = QVBoxLayout(self)
 
@@ -356,8 +436,12 @@ class ActionEditor(QGroupBox):
             widget.setEnabled(not locked)
 
     # -- dialog wrappers ---------------------------------------------------
+    def set_pointer_source(self, pointer: PointerSource | None) -> None:
+        """Give the action dialogs a way to read the pointer and the screens."""
+        self._pointer = pointer
+
     def add_with_dialog(self) -> None:
-        dialog = ActionDialog(parent=self)
+        dialog = ActionDialog(parent=self, pointer=self._pointer)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.action is not None:
             self.add_action(dialog.action)
 
@@ -365,7 +449,7 @@ class ActionEditor(QGroupBox):
         index = self.selected_index
         if not 0 <= index < len(self._actions):
             return
-        dialog = ActionDialog(action=self._actions[index], parent=self)
+        dialog = ActionDialog(action=self._actions[index], parent=self, pointer=self._pointer)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.action is not None:
             self.replace_action(index, dialog.action)
 

@@ -7,6 +7,7 @@ the desktop GUI, a future CLI and the tests.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
@@ -23,6 +24,8 @@ from ..core.validation import validate_plan
 from ..ports.hotkeys import HotkeyPort
 from .profiles import LoadedProfile, Profile, ProfileService
 from .runner import AutomationRunner
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,23 @@ class AutomationService:
     def window_backend(self) -> str:
         """Which window backend was selected for this host."""
         return self._adapters.window_backend
+
+    def pointer_position(self) -> tuple[int, int] | None:
+        """Where the pointer is now, or ``None`` when it cannot be read.
+
+        Read through the same port that will move it during a run, never from
+        the window system. On a scaled display the two disagree - Qt reports
+        logical pixels, the input backend may want physical ones - and a
+        coordinate the run cannot reproduce is worse than no coordinate at all.
+        """
+        if not self._adapters.has_real_pointer:
+            return None
+        try:
+            x, y = self._adapters.mouse.position()
+        except Exception:  # adapters must never crash the UI
+            logger.exception("could not read the pointer position")
+            return None
+        return (int(x), int(y))
 
     @property
     def problems(self) -> tuple[str, ...]:

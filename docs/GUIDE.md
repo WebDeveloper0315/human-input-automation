@@ -106,6 +106,26 @@ Verify the download first: `sha256sum -c SHA256SUMS`.
    works as a global hotkey even when the application is not focused. Stopping
    is immediate and always releases any keys or mouse buttons being held.
 
+### Pointing at something on screen
+
+A mouse move or a click needs coordinates, and nobody knows what they are by
+looking. So don't type them: in the action's dialog, **press and drag the
+*Capture* handle to the place you mean and let go**. The dialog fades while you
+drag — the point you are aiming at is usually behind it — and the coordinates
+appear in X and Y when you release, with a line underneath saying which monitor
+they landed on, or that they landed on none.
+
+Tick *Relative to current position* first and the same drag measures a
+*movement* instead: the distance from where you pressed to where you released,
+shown as `by (-40, +12)`.
+
+The position is read through the same adapter that will move the pointer during
+the run, not from the window system, so a captured coordinate is one the run
+can reproduce — on a scaled display those two disagree. Where a host cannot
+report the pointer at all, the handle is disabled and says so; the spin boxes
+still work, and pressing Space on the handle captures wherever the pointer is
+standing, which is the version of this that works without a mouse.
+
 ### Typing into a code editor
 
 A code editor is not a text box. It indents each new line for you, closes

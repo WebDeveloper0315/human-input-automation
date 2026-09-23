@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from human_input_automation.adapters.null import NullKeyboard, NullMouse
 from human_input_automation.adapters.registry import AdapterSet
 from human_input_automation.application.service import AutomationService
@@ -103,5 +105,42 @@ def test_null_adapters_report_a_non_functional_host() -> None:
         ),
     )
     assert not adapters.is_functional
+    assert not adapters.has_real_pointer
     service = AutomationService(adapters)
     assert service.list_targets() == ()
+    # The null mouse answers (0, 0) to keep the engine simple; that is a fine
+    # answer for a dry run and a misleading one to offer a user as a position.
+    assert service.pointer_position() is None
+
+
+def service_with_mouse(mouse: Any) -> AutomationService:
+    return AutomationService(
+        AdapterSet(
+            keyboard=FakeKeyboard(),
+            mouse=mouse,
+            windows=None,
+            discovery=None,
+            clock=FakeClock(),
+            host=PlatformReport(
+                platform=PlatformName.LINUX,
+                display_server=DisplayServer.X11,
+                capabilities=WindowCapabilities.full(),
+            ),
+        )
+    )
+
+
+def test_the_pointer_is_read_through_the_port_that_will_move_it() -> None:
+    """Not from the window system: on a scaled display the two disagree."""
+    mouse = FakeMouse()
+    mouse.move_to(640, 400, 0)
+
+    assert service_with_mouse(mouse).pointer_position() == (640, 400)
+
+
+def test_a_pointer_that_raises_is_reported_as_unreadable() -> None:
+    class BrokenMouse(FakeMouse):
+        def position(self) -> tuple[int, int]:
+            raise RuntimeError("the display went away")
+
+    assert service_with_mouse(BrokenMouse()).pointer_position() is None

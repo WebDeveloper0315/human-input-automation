@@ -50,6 +50,15 @@ class AdapterSet:
         """True when real input can actually be sent on this host."""
         return not isinstance(self.keyboard, NullKeyboard)
 
+    @property
+    def has_real_pointer(self) -> bool:
+        """True when the pointer's position can be read from the real desktop.
+
+        The null mouse answers ``(0, 0)`` to keep the engine simple, which is a
+        fine answer to give a dry run and a useless one to show a user.
+        """
+        return not isinstance(self.mouse, NullMouse)
+
     def geometry(self) -> ScreenGeometry:
         """Monitor layout, or unknown geometry when it cannot be read."""
         return self.screens.geometry()

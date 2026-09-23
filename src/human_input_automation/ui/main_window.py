@@ -49,6 +49,7 @@ from .capability_banner import CapabilityBanner
 from .dry_run_panel import DryRunPanel
 from .models import (
     FirstRunSummary,
+    PointerSource,
     UiState,
     UnsavedChoice,
     capability_banner,
@@ -130,6 +131,11 @@ class MainWindow(QMainWindow):
         self._build_layout()
         self._connect()
 
+        self.action_editor.set_pointer_source(
+            PointerSource(
+                position=self._service.pointer_position, geometry=lambda: self._service.screen
+            )
+        )
         self._update_banner()
         self.refresh_targets()
         self.refresh_profiles()

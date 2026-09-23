@@ -40,6 +40,7 @@ same name and confuses packaging and analysis tools.
 | `core/timing.py` | `TimingProfile`, `TimingService` |
 | `core/typing_style.py` | `TypingStyle` and the keystroke plan behind mistyping |
 | `core/editor_typing.py` | Predicting what a code editor does, and planning around it |
+| `ui/position_picker.py` | Capturing a screen position by dragging to it |
 | `core/validation.py` | Plan/action/target validation, errors vs warnings |
 | `core/control.py` | `RunControl`: start/pause/resume/stop/emergency stop |
 | `core/engine.py` | `AutomationEngine`, `ExecutionContext`, `ActionRegistry` |
