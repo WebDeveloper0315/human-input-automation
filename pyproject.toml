@@ -101,6 +101,7 @@ module = [
   "PySide6.*",
   "ApplicationServices.*",
   "Quartz.*",
+  "AppKit.*",
   "Foundation.*",
   "ScriptingBridge.*",
 ]

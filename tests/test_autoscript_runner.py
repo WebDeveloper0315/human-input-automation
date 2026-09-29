@@ -28,6 +28,7 @@ from human_input_automation.core.target import (
     DisplayServer,
     PlatformName,
     PlatformReport,
+    RunningApplication,
     TargetWindow,
     WindowCapabilities,
 )
@@ -694,3 +695,129 @@ def test_a_countdown_can_be_cancelled_before_any_input() -> None:
 
     assert outcome is not None and outcome.status is RunStatus.EMERGENCY_STOPPED
     assert shell.ran == [] and "no input was sent" in (outcome.error or "")
+
+
+# ---------------------------------------------------------------------------
+# Applications as a whole (macOS: milliseconds, where listing windows took 13 s)
+# ---------------------------------------------------------------------------
+
+
+class FakeApplications:
+    def __init__(self, *apps: tuple[str, int, int], windows: FakeWindows) -> None:
+        self.apps = [
+            RunningApplication(name, pid, count, window(f"app:{pid}", name, name, pid))
+            for name, pid, count in apps
+        ]
+        self.windows = windows
+        self.activated: list[str] = []
+        self.refuse = False
+
+    def applications(self) -> list[RunningApplication]:
+        return list(self.apps)
+
+    def activate_application(self, application: RunningApplication, cancel: object = None) -> bool:
+        self.activated.append(application.name)
+        if self.refuse:
+            return False
+        self.windows.active = application.target
+        return True
+
+
+class NoWindowListing(FakeWindows):
+    def list_windows(self) -> list[TargetWindow]:
+        raise AssertionError("the slow window listing must not be used")
+
+
+def app_runner(
+    shell: FakeShell, *apps: tuple[str, int, int], windows: FakeWindows | None = None
+) -> tuple[ScriptRunner, FakeApplications, FakeWindows]:
+    windows = windows or NoWindowListing()
+    applications = FakeApplications(*apps, windows=windows)
+    ports = RunnerPorts(
+        keyboard=shell,
+        mouse=FakeMouse(),
+        clock=FakeClock(),
+        discovery=windows,
+        windows=windows,
+        terminal=shell,
+        applications=applications,
+        own_processes=(OwnProcess(RUNNER_PID, "iTerm2"),),
+    )
+    return ScriptRunner(ports, timing=TimingProfile.instant(), seed=3), applications, windows
+
+
+def test_app_is_found_and_brought_forward_without_listing_windows() -> None:
+    shell = FakeShell({"echo hi": "hi"})
+    run, applications, _ = app_runner(shell, ("Terminal", TERMINAL_PID, 1), ("Finder", 200, 3))
+    outcome = run.run(
+        script_of('## S\nApp: Terminal\n- run `echo hi`\n- expect output contains "hi"\n')
+    )
+
+    assert outcome.ok, outcome.error
+    assert applications.activated == ["Terminal"] and shell.ran == ["echo hi"]
+
+
+def test_an_application_with_several_windows_must_have_the_one_meant_in_front() -> None:
+    shell = FakeShell()
+    run, applications, _ = app_runner(shell, ("Terminal", TERMINAL_PID, 2))
+    outcome = run.run(script_of("## S\nApp: Terminal\n- run `ls`\n"))
+
+    assert "Terminal has 2 windows" in (outcome.error or "")
+    assert applications.activated == [] and shell.ran == []
+
+
+def test_several_windows_are_fine_when_the_application_is_already_in_front() -> None:
+    shell = FakeShell()
+    windows = NoWindowListing(active=TERMINAL)
+    run, _, _ = app_runner(shell, ("Terminal", TERMINAL_PID, 2), windows=windows)
+    outcome = run.run(script_of("## S\nApp: Terminal\n- run `ls`\n"))
+    assert outcome.ok, outcome.error
+
+
+def test_the_application_running_the_script_is_refused_by_name() -> None:
+    shell = FakeShell()
+    run, applications, _ = app_runner(shell, ("iTerm2", RUNNER_PID, 1))
+    outcome = run.run(script_of("## S\nApp: iTerm2\n- run `ls`\n"))
+
+    assert "program running this script" in (outcome.error or "")
+    assert applications.activated == []
+
+
+def test_an_application_that_will_not_come_forward_fails_the_step() -> None:
+    shell = FakeShell()
+    run, applications, _ = app_runner(shell, ("Terminal", TERMINAL_PID, 1))
+    applications.refuse = True
+    outcome = run.run(script_of("## S\nApp: Terminal\n- run `ls`\n"))
+
+    assert "could not bring Terminal to the front" in (outcome.error or "")
+    assert shell.ran == []
+
+
+def test_a_web_application_still_falls_back_to_window_titles() -> None:
+    coggle = window("c1", "Portfolio — Coggle", "Google Chrome", 300)
+    shell = FakeShell()
+    windows = FakeWindows(windows=[coggle, HOST])
+    run, applications, _ = app_runner(shell, ("Google Chrome", 300, 1), windows=windows)
+    outcome = run.run(script_of("## S\nApp: Coggle\n- key-click cmd+t\n"))
+
+    assert outcome.ok, outcome.error
+    assert applications.activated == [] and "activate:c1" in windows.calls
+
+
+def test_waiting_for_an_application_window_uses_the_quick_list() -> None:
+    shell = FakeShell()
+    clock = FakeClock()
+    run, applications, _ = app_runner(shell, ("Finder", 200, 1))
+    run.ports.clock = clock
+    starting = RunningApplication("Terminal", TERMINAL_PID, 0, TERMINAL)
+
+    def terminal_starts(clock: FakeClock) -> None:
+        if starting not in applications.apps:
+            applications.apps.append(starting)  # running, window not up yet
+        elif clock.now > 1.0:
+            applications.apps[-1] = RunningApplication("Terminal", TERMINAL_PID, 1, TERMINAL)
+
+    clock.on_sleep = terminal_starts
+    script = script_of('## S\nApp: Finder\n- key-click cmd+space\n- wait for window "Terminal"\n')
+    outcome = run.run(script)
+    assert outcome.ok, outcome.error

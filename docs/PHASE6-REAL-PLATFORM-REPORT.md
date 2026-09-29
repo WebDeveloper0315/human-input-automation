@@ -306,6 +306,21 @@ front window (one Quartz call), and looks up the window only when focus has
 moved (`test_typing_does_not_look_up_the_whole_window_for_every_key`). Not yet
 re-run on the Mac. `App: Terminal` (15 s) and `read output` (11 s) were also
 slow; `tools/platform_verify/macos_timing.py` measures each call, read-only.
+Its first run on the same Mac (ten windows open), medians:
+
+| Question | Time |
+| --- | --- |
+| Owner of the front window (Quartz) - the per-keystroke check now | 1.5 ms |
+| The focused window through pywinctl - the per-keystroke check before | 1551 ms |
+| Every window through pywinctl - what `App:` used | 13 361 ms |
+| Terminal's text, whole history / visible contents (`osascript`) | 285 / 246 ms |
+| `osascript` that does nothing | 98 ms |
+
+So `App:` now finds applications through `adapters/macos_apps.py`
+(NSWorkspace + the Quartz window list) and brings them forward with
+`NSRunningApplication`, falling back to LaunchServices (`open -a`) when macOS
+declines; windows are listed only to find a web application by its title.
+Not yet re-run on the Mac.
 
 **Not verified:** macOS Terminal and iTerm2 (AppleScript text reading, the
 Automation permission prompt, Spotlight as a system surface, whether

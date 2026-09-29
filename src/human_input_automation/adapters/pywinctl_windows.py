@@ -214,23 +214,15 @@ class PyWinCtlWindows:
         return active.process_id if active is not None else None
 
     def _macos_front_pid(self) -> int | None:
-        try:
-            quartz = self._quartz
-            if quartz is None:
-                import Quartz
+        from .macos_apps import front_process_id
 
-                quartz = self._quartz = Quartz
-            windows = quartz.CGWindowListCopyWindowInfo(
-                quartz.kCGWindowListOptionOnScreenOnly
-                | quartz.kCGWindowListExcludeDesktopElements,
-                quartz.kCGNullWindowID,
-            )
-            for info in windows or ():
-                if int(info.get("kCGWindowLayer", -1)) == 0:
-                    return int(info["kCGWindowOwnerPID"])
-        except Exception:
-            logger.debug("front window query failed", exc_info=True)
-        return None
+        if self._quartz is None:
+            try:
+                import Quartz
+            except Exception:
+                return None
+            self._quartz = Quartz
+        return front_process_id(self._quartz)
 
     # -- internals ---------------------------------------------------------
     def _resolve(self, target: TargetWindow) -> Any:
