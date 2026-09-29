@@ -84,6 +84,9 @@ class RecordingWindowControl:
     def active_window(self) -> TargetWindow | None:
         return None
 
+    def active_process_id(self) -> int | None:
+        return None
+
 
 class VirtualClock:
     """Clock that advances instantly instead of sleeping.

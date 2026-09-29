@@ -319,6 +319,9 @@ class _Run:
         self.mouse: MousePort = RecordingMouse() if dry_run else ports.mouse
         self.clock: Clock = VirtualClock() if dry_run else ports.clock
         self.own_pids = {process.pid for process in ports.own_processes}
+        #: Processes found to be the system's own surfaces (Spotlight), so the
+        #: slow lookup is not repeated for every letter typed into them.
+        self.surface_pids: set[int] = set()
         self.terminals = KNOWN_TERMINALS | {
             step.name.casefold()
             for step in _script_steps(script)
@@ -511,21 +514,35 @@ class _Run:
                 line, "no App: has been named yet, so there is no window to send this to"
             )
         windows = self.owner.ports.windows
-        active = windows.active_window() if windows is not None else None
-        if active is None:
+        if windows is None:
+            return
+        # The cheap question first; it is asked before every keystroke. The
+        # full window, slow on macOS, is looked up only once focus has moved.
+        pid = windows.active_process_id()
+        if pid is None:
             return  # cannot tell - "unknown" is never "no"
-        if active.process_id is not None and active.process_id in self.own_pids:
+        expected = self.app.window
+        if pid not in self.own_pids and (
+            expected is None or expected.process_id is None or pid == expected.process_id
+        ):
+            return
+        if pid in self.surface_pids:
+            return
+        active = windows.active_window()
+        if active is None:
+            return
+        if pid in self.own_pids or active.process_id in self.own_pids:
             raise StepFailed(
                 line,
                 f"focus is on {_window_name(active)}, which is the program running this "
                 "script; stopping so nothing is typed into it",
             )
-        expected = self.app.window
-        if expected is None or expected.process_id is None or active.process_id is None:
+        if expected is None or active.process_id is None:
             return
         if active.process_id == expected.process_id:
             return
         if (active.process_name or active.app_id or "").casefold() in SYSTEM_SURFACES:
+            self.surface_pids.add(pid)
             return
         raise StepFailed(
             line,

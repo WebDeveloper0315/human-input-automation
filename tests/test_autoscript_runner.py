@@ -408,6 +408,18 @@ def test_focus_moving_part_way_through_typing_stops_the_rest() -> None:
     assert len(shell.line) == typed_when_switched[0], "not one key after focus moved"
 
 
+def test_typing_does_not_look_up_the_whole_window_for_every_key() -> None:
+    """On macOS that lookup costs over a second; seen as 1.5 s per keystroke."""
+    shell = FakeShell()
+    windows = FakeWindows(windows=[TERMINAL, HOST])
+    run, _ = runner(shell, windows)
+    outcome = run.run(script_of('## S\nApp: Terminal\n- type "' + "x" * 200 + '"\n'))
+
+    assert outcome.ok, outcome.error
+    assert len(shell.line) == 200
+    assert windows.window_lookups == 0
+
+
 def test_spotlight_is_not_another_application() -> None:
     """Typing into Spotlight on the way to opening an application is allowed."""
     spotlight = window("s1", "Spotlight", "Spotlight", 400)
@@ -423,6 +435,7 @@ def test_spotlight_is_not_another_application() -> None:
     outcome = run.run(script, listener=open_spotlight)
 
     assert outcome.ok, outcome.error
+    assert windows.window_lookups == 1, "found to be Spotlight once, then remembered"
 
 
 def test_several_windows_of_an_application_use_the_one_in_front() -> None:

@@ -64,8 +64,11 @@ class PyWinCtlWindows:
         host: PlatformReport,
         module: Any | None = None,
         activation_timeout: float | None = None,
+        quartz: Any | None = None,
     ) -> None:
         self._pywinctl = module if module is not None else import_pywinctl()
+        #: Quartz (PyObjC), for the one-call front-window query on macOS.
+        self._quartz = quartz
         self._host = host
         self._activation_timeout = (
             activation_timeout if activation_timeout is not None
@@ -192,6 +195,42 @@ class PyWinCtlWindows:
         except Exception:
             return None
         return self._to_target(window) if window is not None else None
+
+    def active_process_id(self) -> int | None:
+        """The owner of the frontmost window, in one call where the platform allows.
+
+        On macOS, Quartz's window list is ordered front to back, and the first
+        normal window (layer 0) belongs to the application in front. It skips
+        panels above that layer, such as Spotlight, which is what the caller
+        wants: Spotlight is not another application's document. Unlike
+        ``NSWorkspace.frontmostApplication`` it is not refreshed through the
+        main run loop, so it is current on a worker thread and in the CLI too.
+        """
+        if not self._host.matrix.is_permitted(CapabilityName.FOCUS_VERIFICATION):
+            return None
+        if self._host.platform is PlatformName.MACOS:
+            return self._macos_front_pid()
+        active = self.active_window()
+        return active.process_id if active is not None else None
+
+    def _macos_front_pid(self) -> int | None:
+        try:
+            quartz = self._quartz
+            if quartz is None:
+                import Quartz
+
+                quartz = self._quartz = Quartz
+            windows = quartz.CGWindowListCopyWindowInfo(
+                quartz.kCGWindowListOptionOnScreenOnly
+                | quartz.kCGWindowListExcludeDesktopElements,
+                quartz.kCGNullWindowID,
+            )
+            for info in windows or ():
+                if int(info.get("kCGWindowLayer", -1)) == 0:
+                    return int(info["kCGWindowOwnerPID"])
+        except Exception:
+            logger.debug("front window query failed", exc_info=True)
+        return None
 
     # -- internals ---------------------------------------------------------
     def _resolve(self, target: TargetWindow) -> Any:

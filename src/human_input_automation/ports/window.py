@@ -56,3 +56,13 @@ class WindowControlPort(Protocol):
         which application - has focus, before every step that sends input.
         """
         ...
+
+    def active_process_id(self) -> int | None:
+        """The process that owns the focused window, or ``None`` when unknown.
+
+        Asked before every keystroke of a script, so it must be cheap: one call,
+        not a walk over window properties. On macOS each property of a window
+        is an Accessibility round trip, and asking :meth:`active_window` that
+        often slowed typing to over a second per key.
+        """
+        ...
