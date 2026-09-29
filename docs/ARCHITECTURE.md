@@ -49,11 +49,12 @@ same name and confuses packaging and analysis tools.
 | `core/handlers.py` | One handler function per built-in action |
 | `core/events.py` | Run events and `RunReport` |
 | `core/dryrun.py` | Recording no-op ports used by dry-run mode |
-| `ports/*` | `KeyboardPort`, `MousePort` (incl. `follow_path`), `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort`, `TerminalPort` |
+| `ports/*` | `KeyboardPort`, `MousePort` (incl. `follow_path`), `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort`, `TerminalPort`, `ApplicationPort` |
 | `core/capabilities.py` | `CapabilityMatrix`: per-capability state, reason, permission |
 | `core/screen.py` | `MonitorInfo`, `ScreenGeometry`, coordinate space |
 | `application/autoscript.py` | Reading a script file from disk; the ports a script run uses on this host; what refuses a run; `ScriptSession` (worker thread, countdown) |
 | `adapters/terminal_text.py` | A terminal's text: AppleScript for Terminal/iTerm2 (macOS), `tmux capture-pane` (Linux) |
+| `adapters/macos_apps.py` | Running applications on macOS in milliseconds (NSWorkspace + Quartz window list); activation with a LaunchServices fallback |
 | `adapters/process_tree.py` | This process and its ancestors - windows a script must never type into |
 | `adapters/x11_typing.py` | Characters through XTEST on X11 (pynput's synthetic events are refused by xterm) |
 | `adapters/platform_info.py` | Platform/display-server/permission detection, capability matrices |

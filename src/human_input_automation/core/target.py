@@ -171,6 +171,23 @@ class TargetWindow:
 
 
 @dataclass(frozen=True)
+class RunningApplication:
+    """An application that is running, addressed as a whole rather than by window.
+
+    ``App: Terminal`` means the application, not one of its windows, and on
+    macOS the question "is Terminal running, with how many windows?" costs
+    milliseconds where listing every window with its title costs seconds.
+    """
+
+    name: str
+    process_id: int
+    #: Normal windows on screen (minimised and hidden windows are not counted).
+    windows: int
+    #: The application as a target: its process, never one window's handle.
+    target: TargetWindow
+
+
+@dataclass(frozen=True)
 class PlatformReport:
     """Result of probing the host for automation support.
 

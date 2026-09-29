@@ -62,7 +62,12 @@ def main() -> None:
 
     measure("front process (fast path, per keystroke)", windows.active_process_id, repeat=20)
     measure("focused window (full lookup)", windows.active_window)
-    measure("list every window (App: step)", adapters.discovery.list_windows, repeat=3)
+    from human_input_automation.application.autoscript import application_port
+
+    applications = application_port(adapters.host)
+    if applications is not None:
+        measure("running applications (App: step, new)", applications.applications, repeat=20)
+    measure("list every window (App: by title only)", adapters.discovery.list_windows, repeat=3)
     measure(
         "Terminal text: whole history",
         lambda: osascript(

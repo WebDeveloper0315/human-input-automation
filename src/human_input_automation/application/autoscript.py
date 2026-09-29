@@ -37,6 +37,7 @@ from ..core.events import (
     RunStatus,
 )
 from ..core.target import PlatformName, PlatformReport
+from ..ports.applications import ApplicationPort
 from ..ports.terminal import TerminalPort
 
 logger = logging.getLogger(__name__)
@@ -89,6 +90,19 @@ def terminal_reader(host: PlatformReport) -> TerminalPort | None:
     return None
 
 
+def application_port(host: PlatformReport) -> ApplicationPort | None:
+    """Applications as a whole, where finding them by window is slow (macOS)."""
+    if host.platform is not PlatformName.MACOS:
+        return None
+    try:
+        from ..adapters.macos_apps import MacApplications
+
+        return MacApplications(host)
+    except Exception:  # no PyObjC: windows are still found the slow way
+        logger.info("application lookup unavailable; using window discovery", exc_info=True)
+        return None
+
+
 def script_ports(
     adapters: AdapterSet, own: tuple[OwnProcess, ...] | None = None
 ) -> RunnerPorts:
@@ -102,6 +116,7 @@ def script_ports(
         discovery=adapters.discovery,
         windows=adapters.windows,
         terminal=terminal_reader(adapters.host),
+        applications=application_port(adapters.host),
         screen=adapters.geometry(),
         own_processes=own if own is not None else own_processes(),
     )

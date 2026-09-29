@@ -35,6 +35,7 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 
+from ...ports.applications import ApplicationPort
 from ...ports.clock import Clock
 from ...ports.input import KeyboardPort, MousePort
 from ...ports.terminal import TerminalPort
@@ -51,7 +52,7 @@ from ..keys import Key, MouseButton, format_key
 from ..plan import ExecutionLimits
 from ..pointer_path import PointerStyle
 from ..screen import ScreenGeometry
-from ..target import TargetWindow
+from ..target import RunningApplication, TargetWindow
 from ..timing import TimingProfile, TimingService
 from ..typing_style import TypingStyle
 from .model import (
@@ -113,6 +114,9 @@ SYSTEM_SURFACES = frozenset(
 
 #: How often a window or the terminal's text is looked at while waiting.
 POLL_MS = 250.0
+#: With a quick list of applications, how long `wait for window` relies on it
+#: alone before also searching window titles, which is slow on macOS.
+TITLE_SEARCH_AFTER_S = 2.0
 #: How long `expect output …` waits for its output to appear.
 OUTPUT_TIMEOUT_S = 10.0
 #: How long a `run` waits for the command before it to finish.
@@ -146,6 +150,8 @@ class RunnerPorts:
     discovery: WindowDiscoveryPort | None = None
     windows: WindowControlPort | None = None
     terminal: TerminalPort | None = None
+    #: Applications as a whole; where present, `App:` uses it before windows.
+    applications: ApplicationPort | None = None
     screen: ScreenGeometry | None = None
     own_processes: tuple[OwnProcess, ...] = ()
 
@@ -556,6 +562,16 @@ class _Run:
         if self.dry_run:
             self.app = _App(step.name, None, is_terminal)
             return
+        application = self._resolve_application(step.name, step.line)
+        if application is not None:
+            applications = self.owner.ports.applications
+            assert applications is not None
+            if not applications.activate_application(application, self.control):
+                self.control.raise_if_stopped()
+                raise StepFailed(step.line, f"could not bring {application.name} to the front")
+            self.app = _App(step.name, application.target, is_terminal)
+            self.output_before = self.prompt = None
+            return
         discovery, windows = self.owner.ports.discovery, self.owner.ports.windows
         if discovery is None or windows is None:
             raise StepFailed(step.line, "this platform cannot find or focus windows")
@@ -567,6 +583,39 @@ class _Run:
             raise StepFailed(step.line, f"{_window_name(target)} did not take focus")
         self.app = _App(step.name, target, is_terminal)
         self.output_before = self.prompt = None
+
+    def _resolve_application(self, name: str, line: int) -> RunningApplication | None:
+        """§5.14 step 1 through the application port, where there is one.
+
+        ``None`` means "not found this way": the window search still runs, and
+        is what finds a web application by its window title.
+        """
+        port = self.owner.ports.applications
+        if port is None:
+            return None
+        named = [app for app in port.applications() if _is_application(app.target, name)]
+        allowed = [app for app in named if app.process_id not in self.own_pids]
+        if named and not allowed:
+            raise StepFailed(
+                line,
+                f"{name} is the program running this script. Start it from another "
+                "application, so it cannot type into itself",
+            )
+        if not allowed:
+            return None
+        if len(allowed) > 1:
+            raise StepFailed(line, f"{len(allowed)} running applications are called {name!r}")
+        application = allowed[0]
+        if application.windows > 1:
+            windows = self.owner.ports.windows
+            front = windows.active_process_id() if windows is not None else None
+            if front != application.process_id:
+                raise StepFailed(
+                    line,
+                    f"{name} has {application.windows} windows. Close all but one, or bring "
+                    "the one you mean to the front, so the script is not guessing",
+                )
+        return application
 
     def _resolve(self, name: str, line: int) -> TargetWindow:
         """§5.14: the application by name, else a window whose title contains it."""
@@ -617,17 +666,36 @@ class _Run:
             raise StepFailed(step.line, "this platform cannot list windows")
         title = _render(step.title, frame, step.line)
         deadline = self.clock.monotonic() + step.timeout_s
+        applications = self.owner.ports.applications
+        # Listing windows by title is slow on macOS (13 s measured); the quick
+        # list of applications is polled alone first, since an application
+        # just launched from Spotlight is the common case.
+        titles_from = self.clock.monotonic() + (TITLE_SEARCH_AFTER_S if applications else 0.0)
         while True:
+            if applications is not None:
+                named = [
+                    app
+                    for app in applications.applications()
+                    if app.process_id not in self.own_pids and _is_application(app.target, title)
+                ]
+                if any(app.windows > 0 for app in named):
+                    return
+                if named or self.clock.monotonic() < titles_from:
+                    self._wait_or_fail(step, title, deadline)
+                    continue
             for window in discovery.list_windows():
                 if window.process_id in self.own_pids:
                     continue
                 if _is_application(window, title) or _normalise(title) in _normalise(window.title):
                     return
-            if self.clock.monotonic() >= deadline:
-                raise StepFailed(
-                    step.line, f"no window for {title!r} appeared within {step.timeout_s:g} s"
-                )
-            self.ctx.sleep_ms(POLL_MS)
+            self._wait_or_fail(step, title, deadline)
+
+    def _wait_or_fail(self, step: WaitForWindow, title: str, deadline: float) -> None:
+        if self.clock.monotonic() >= deadline:
+            raise StepFailed(
+                step.line, f"no window for {title!r} appeared within {step.timeout_s:g} s"
+            )
+        self.ctx.sleep_ms(POLL_MS)
 
     # -- terminal output ------------------------------------------------------
     def _require_terminal(self, line: int, what: str) -> None:
