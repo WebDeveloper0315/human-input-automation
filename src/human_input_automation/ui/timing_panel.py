@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..core.errors import ValidationError
+from ..core.pointer_path import PointerStyle
 from ..core.timing import TimingProfile
 from ..core.typing_style import TypingStyle
 from .models import (
@@ -27,6 +28,7 @@ from .models import (
     TIMING_FIELDS,
     build_timing_profile,
     format_preview,
+    pointer_style_to_values,
     preview_delays,
     timing_to_values,
     typing_style_to_values,
@@ -53,6 +55,9 @@ class TimingPanel(QGroupBox):
         # panel; keeping the loaded style means the two controls below cannot
         # quietly flatten values someone set by hand in the file.
         self._typing_style = TypingStyle()
+        #: Kept for the same reason: a profile may carry a bow and a tremor
+        #: this panel does not show, and one checkbox must not flatten them.
+        self._pointer_style = PointerStyle()
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -123,10 +128,22 @@ class TimingPanel(QGroupBox):
         self.mistakes_spin.setAccessibleName("Mistake rate")
         self.mistakes_spin.valueChanged.connect(self._on_changed)
 
+        self.hand_check = QCheckBox("Move the pointer the way a hand does")
+        self.hand_check.setAccessibleName("Human pointer movement")
+        self.hand_check.setToolTip(
+            "A curved path, a speed that builds and brakes, and sometimes a small "
+            "overshoot - instead of a straight line at a constant speed. The pointer "
+            "still lands exactly on the target."
+        )
+        self.hand_check.setChecked(True)
+        self.hand_check.toggled.connect(self._on_changed)
+
         mistakes_row = QHBoxLayout()
         mistakes_row.setContentsMargins(0, 0, 0, 0)
         mistakes_row.addWidget(self.mistakes_check)
         mistakes_row.addWidget(self.mistakes_spin)
+        mistakes_row.addSpacing(16)
+        mistakes_row.addWidget(self.hand_check)
         mistakes_row.addStretch(1)
         mistakes_widget = QWidget()
         mistakes_widget.setLayout(mistakes_row)
@@ -188,6 +205,16 @@ class TimingPanel(QGroupBox):
             percent=float(self.mistakes_spin.value()),
         )
 
+    def pointer_style(self) -> PointerStyle:
+        """How the pointer should travel during the run."""
+        if not self.hand_check.isChecked():
+            return PointerStyle.direct()
+        return PointerStyle() if self._pointer_style.is_direct else self._pointer_style
+
+    def set_pointer_style(self, style: PointerStyle) -> None:
+        self._pointer_style = style
+        self.hand_check.setChecked(bool(pointer_style_to_values(style)["natural"]))
+
     def set_typing_style(self, style: TypingStyle) -> None:
         """Show a loaded style, keeping the parts this panel does not edit."""
         self._typing_style = style
@@ -211,6 +238,7 @@ class TimingPanel(QGroupBox):
         self.seed_check.setEnabled(not locked)
         self.seed_spin.setEnabled(not locked and self.seed_check.isChecked())
         self.mistakes_check.setEnabled(not locked)
+        self.hand_check.setEnabled(not locked)
         self.mistakes_spin.setEnabled(not locked and self.mistakes_check.isChecked())
         self.preview_button.setEnabled(not locked)
 

@@ -1,4 +1,4 @@
-# Profile format (schema 1)
+# Profile format (schema 3)
 
 A profile is a saved automation: a name, a durable way to find the target
 application again, and the plan to run against it.
@@ -38,7 +38,7 @@ interrupted save leaves the previous version intact — never a truncated file.
 
 ```json
 {
-  "schema": 1,
+  "schema": 3,
   "id": "e0e2a5d67c754004a1451b016187a86b",
   "name": "Open Search",
   "description": "Focus search and type",
@@ -59,7 +59,7 @@ interrupted save leaves the previous version intact — never a truncated file.
       {
         "type": "type_code", "delay_after_ms": null,
         "text": "function test() {\n    return true;\n}",
-        "indent": "reclaim", "drop_auto_pairs": true,
+        "indent": "match", "pairs": "reuse", "indent_width": 0,
         "dismiss_suggestions": true, "line_start_chord": "shift+home"
       },
       { "type": "key_press", "delay_after_ms": null, "key": "enter", "count": 1 }
@@ -79,6 +79,11 @@ interrupted save leaves the previous version intact — never a truncated file.
       "correction_pause_ms": 90.0, "correction_pause_jitter_ms": 45.0,
       "hesitation_rate": 0.0, "hesitation_ms": 450.0, "hesitation_jitter_ms": 250.0
     },
+    "pointer": {
+      "bow": 0.09, "bow_jitter": 0.05, "tremor_px": 1.0,
+      "overshoot_rate": 0.2, "overshoot_fraction": 0.04, "correction_share": 0.25,
+      "scale_with_distance": true, "step_ms": 8.0
+    },
     "limits": {
       "max_actions": 500, "max_text_length": 20000,
       "max_total_characters": 100000, "max_run_duration_s": 3600.0
@@ -96,14 +101,39 @@ interrupted save leaves the previous version intact — never a truncated file.
 `"schema"` is **required** and must be an integer. The version is never inferred
 from which fields are present.
 
-* This build writes and reads **schema 1**.
+* This build writes **schema 3** and reads 1, 2 and 3.
 * A newer version is rejected explicitly:
-  `Unsupported profile schema version: 2`. Nothing is downgraded or ignored.
+  `Unsupported profile schema version: 4`. Nothing is downgraded or ignored.
 * Older versions are handled by a migration registry
-  (`serialization.MIGRATIONS`, `from_version -> upgrade function`). It is empty
-  today because only version 1 exists; adding version 2 means adding one entry,
-  not touching every caller. A migration that fails to advance the version is an
-  error rather than an infinite loop.
+  (`serialization.MIGRATIONS`, `from_version -> upgrade function`), one entry
+  per step, walked in order. A migration that fails to advance the version is
+  an error rather than an infinite loop.
+
+### 1 -> 2: `type_code` describes the editor, not a strategy
+
+Version 1 had `drop_auto_pairs`, a boolean meaning "delete the bracket the
+editor closed for me". What it recorded was a *fact* - this editor closes
+brackets - so the fact is kept and the strategy is left to the planner, which
+now walks onto those brackets instead of deleting them:
+
+| Version 1 | Version 2 |
+| --- | --- |
+| `"drop_auto_pairs": true` | `"pairs": "reuse"` |
+| `"drop_auto_pairs": false` | `"pairs": "off"` (the editor closes nothing) |
+| `"indent": "reclaim"` | `"indent": "match"` |
+
+`reclaim` is migrated because it was the only way to end up with the text as
+written, not a preference for typing over the editor's indentation. It remains
+a value anyone can choose.
+
+### 2 -> 3: the plan says how the pointer travels
+
+Version 2 had no `pointer` section, because the pointer only ever went in a
+straight line at a constant speed. The migration adds one with the default
+hand-like movement: the straight line was the only behaviour on offer, not a
+choice, and the pointer still lands on exactly the same pixel, so what a
+profile does is unchanged. Unticking *Move the pointer the way a hand does*
+and saving writes the straight line down explicitly.
 
 ## Actions
 
@@ -127,17 +157,31 @@ for every action type.
 Types text into an editor that edits while you type. Same text as `type_text`,
 sent one line at a time with the editor's own helpfulness compensated for.
 
+The settings describe the editor rather than a strategy; the keystrokes follow
+from them.
+
 | Field | Values | Meaning |
 | --- | --- | --- |
-| `indent` | `"reclaim"` (default), `"editor"`, `"off"` | `reclaim` selects the indentation the editor inserted and types over it, so the text arrives exactly as written. `editor` drops our leading whitespace and keeps the editor's. `off` sends the text unchanged. |
-| `drop_auto_pairs` | `true` (default) / `false` | After a line that leaves a bracket open, press Delete once per open bracket to remove the partner the editor added. Assumes the editor closes brackets; in one that does not, those presses delete real text. |
-| `dismiss_suggestions` | `true` (default) / `false` | Press Escape at the end of each line so Enter starts a new line instead of accepting a completion. |
-| `line_start_chord` | `"shift+home"` (default), any chord | How to select to the start of the line for `reclaim`. `meta+shift+left` is the native macOS equivalent. |
+| `indent` | `"match"` (default), `"reclaim"`, `"editor"`, `"off"` | `match` keeps the indentation the editor inserted and types only the difference - usually nothing. `reclaim` selects it and types over it: slower by a chord and an indent per line, and assumes nothing. `editor` drops our leading whitespace and keeps the editor's. `off` is for an editor that does not indent. |
+| `pairs` | `"reuse"` (default), `"delete"`, `"off"` | `reuse` walks the caret down onto the closing bracket the editor already wrote, and deletes only the ones the source never closes. `delete` removes every one and types our own. `off` is for an editor that closes nothing - the other two would press Delete at a character of the user's. |
+| `indent_width` | `0` (default) - `16` | Columns per level. `0` reads it from the text; set it when the editor's tab size differs, because that is what decides where the caret lands after a new line. |
+| `dismiss_suggestions` | `true` (default) / `false` | Press Escape before leaving each line, so the Enter or arrow that follows moves the caret instead of accepting a completion. |
+| `line_start_chord` | `"shift+home"` (default), any chord | How to select to the start of the line. `meta+shift+left` is the native macOS equivalent. |
 
-Which brackets are outstanding is counted from the line itself, skipping
-anything inside a string or after `//` or `#`. An unterminated quote stops the
-count early, which leaves a bracket behind rather than deleting a character the
-user typed.
+Which brackets are outstanding is read from the line itself, skipping anything
+inside a string or after `//` or `#`. An unterminated quote stops the scan,
+which leaves a bracket behind rather than deleting a character the user typed.
+
+A closing-bracket line is only walked onto when the source's own line starts
+with exactly what the editor will have written there - the opener's
+indentation plus the brackets - and when there is a body between the two, since
+an empty block would leave the editor's blank line behind. Everything else is
+typed, and any bracket the source never closes is still deleted.
+
+**Where a prediction is wrong**, `match` produces a block indented the way the
+editor indents rather than the way the source does: complete, correctly nested,
+and not what was written. No text of the user's is removed to get there.
+`reclaim` is the mode that assumes nothing.
 
 ## Typing style
 
@@ -186,6 +230,30 @@ finish in time.
 
 The desktop UI always runs with the defaults above; a profile's stored limits
 are read back for inspection but the GUI does not yet expose them for editing.
+
+## Pointer style
+
+`plan.pointer` decides how the pointer travels between two points. The default
+is a hand: an arc rather than a line, a speed that builds and brakes rather
+than a constant, and now and then a small overshoot and correction.
+
+| Field | Meaning |
+| --- | --- |
+| `bow`, `bow_jitter` | How far the path arcs away from the straight line, as a fraction of the distance. One direction per movement - a hand curves, it does not weave. |
+| `tremor_px` | Small deviations along the way, tapered to nothing at both ends. |
+| `overshoot_rate` | How often the pointer goes past the target before coming back. |
+| `overshoot_fraction` | How far past, as a fraction of the distance. |
+| `correction_share` | The share of the movement spent correcting an overshoot. |
+| `scale_with_distance` | Whether a longer reach takes longer, as Fitts's law says it does. The profile's `mouse_move_duration_ms` then describes a 200 px hop rather than every movement. |
+| `step_ms` | How often a position is written while moving. Also the longest a stop can be delayed by a movement in flight. |
+
+Whatever the settings, **the path ends exactly on the target** and takes
+exactly as long as it was asked to. Setting `bow`, `tremor_px` and
+`overshoot_rate` to zero gives a straight line at a constant speed, which is
+what the application did before this section existed.
+
+A version-2 profile gains this section by migration (see above); it is never
+inferred from the key being missing.
 
 ## Target identity
 

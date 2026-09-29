@@ -183,6 +183,16 @@ class PyWinCtlWindows:
         except Exception:
             return None
 
+    def active_window(self) -> TargetWindow | None:
+        """The focused window, or ``None`` when it cannot be read."""
+        if not self._host.matrix.is_permitted(CapabilityName.FOCUS_VERIFICATION):
+            return None
+        try:
+            window = self._pywinctl.getActiveWindow()
+        except Exception:
+            return None
+        return self._to_target(window) if window is not None else None
+
     # -- internals ---------------------------------------------------------
     def _resolve(self, target: TargetWindow) -> Any:
         """Find the live window for ``target``, checking it is the same one.

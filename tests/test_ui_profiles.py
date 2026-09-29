@@ -147,6 +147,25 @@ def test_saving_persists_the_typing_style(harness: Any) -> None:
     assert app.window.timing_panel.typing_style().typo_rate == pytest.approx(0.06)
 
 
+def test_saving_persists_how_the_pointer_moves(harness: Any) -> None:
+    from human_input_automation.core.pointer_path import PointerStyle
+
+    app = harness()
+    app.compose()
+    app.window.timing_panel.hand_check.setChecked(False)
+    app.window.save_profile_as("Straight")
+
+    stored = app.profiles.load(app.window.profile.id)
+    assert stored.plan is not None
+    assert stored.plan.pointer == PointerStyle.direct()
+
+    app.window.new_profile()
+    assert not app.window.timing_panel.pointer_style().is_direct
+
+    app.window.load_profile(stored.id)
+    assert not app.window.timing_panel.hand_check.isChecked()
+
+
 def test_loading_restores_actions_timing_and_seed(harness: Any) -> None:
     app = harness()
     app.compose(TypeText(text="restored"), Wait(duration_ms=250))

@@ -197,6 +197,12 @@ class X11Windows:
             return None
         return format_handle(prop.value[0])
 
+    def active_window(self) -> TargetWindow | None:
+        """The focused window, or ``None`` if it cannot be read."""
+        handle = self.active_handle()
+        window_id = self._parse_handle(handle) if handle is not None else None
+        return self._to_target(window_id) if window_id is not None else None
+
     def close(self) -> None:
         """Release the X connection. Safe to call more than once."""
         with contextlib.suppress(Exception):  # depends on the X connection

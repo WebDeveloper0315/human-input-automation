@@ -19,12 +19,14 @@ from ...core.errors import AutomationError, ValidationIssue
 from ...core.plan import AutomationPlan
 from ...core.target import DisplayServer, PlatformName, TargetWindow
 
-#: The only schema version this build writes and understands.
-SCHEMA_VERSION = 1
+#: The schema version this build writes.
+SCHEMA_VERSION = 3
 
 #: Versions this build can read. Anything else is rejected explicitly rather
-#: than being guessed at or silently downgraded.
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1})
+#: than being guessed at or silently downgraded. Version 1 is reached through
+#: the migration registry in :mod:`.serialization`, never by leniency here.
+#: So is version 2.
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 _PROFILE_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 

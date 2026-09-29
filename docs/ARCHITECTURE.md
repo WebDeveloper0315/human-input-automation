@@ -39,15 +39,23 @@ same name and confuses packaging and analysis tools.
 | `core/target.py` | `TargetWindow`, `WindowCapabilities`, `PlatformReport` |
 | `core/timing.py` | `TimingProfile`, `TimingService` |
 | `core/typing_style.py` | `TypingStyle` and the keystroke plan behind mistyping |
+| `core/editor_typing.py` | Predicting what a code editor does, and planning around it |
+| `core/autoscript/` | AutoScript: `model`, `parser`, `validator` (text in, checked script out, nothing run) and `runner` (performs a checked script through injected ports, each motor step handed to the engine's own handlers; focus guard before every keystroke) |
+| `core/pointer_path.py` | `PointerStyle` and the timed path the pointer follows; adapters only replay it |
+| `ui/position_picker.py` | Capturing a screen position by dragging to it |
 | `core/validation.py` | Plan/action/target validation, errors vs warnings |
 | `core/control.py` | `RunControl`: start/pause/resume/stop/emergency stop |
 | `core/engine.py` | `AutomationEngine`, `ExecutionContext`, `ActionRegistry` |
 | `core/handlers.py` | One handler function per built-in action |
 | `core/events.py` | Run events and `RunReport` |
 | `core/dryrun.py` | Recording no-op ports used by dry-run mode |
-| `ports/*` | `KeyboardPort`, `MousePort`, `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort` |
+| `ports/*` | `KeyboardPort`, `MousePort` (incl. `follow_path`), `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort`, `TerminalPort` |
 | `core/capabilities.py` | `CapabilityMatrix`: per-capability state, reason, permission |
 | `core/screen.py` | `MonitorInfo`, `ScreenGeometry`, coordinate space |
+| `application/autoscript.py` | Reading a script file from disk; the ports a script run uses on this host; what refuses a run; `ScriptSession` (worker thread, countdown) |
+| `adapters/terminal_text.py` | A terminal's text: AppleScript for Terminal/iTerm2 (macOS), `tmux capture-pane` (Linux) |
+| `adapters/process_tree.py` | This process and its ancestors - windows a script must never type into |
+| `adapters/x11_typing.py` | Characters through XTEST on X11 (pynput's synthetic events are refused by xterm) |
 | `adapters/platform_info.py` | Platform/display-server/permission detection, capability matrices |
 | `adapters/keymap.py` | **The only** place platform key names live |
 | `adapters/x11_windows.py` | X11/EWMH window discovery and activation (Linux) |
@@ -71,6 +79,7 @@ same name and confuses packaging and analysis tools.
 | `application/profiles/resolver.py` | Finding a saved target again, deterministically |
 | `application/profiles/service.py` | Storage + resolution + existing validation |
 | `ui/models.py` | **Qt-free** presentation logic: run-state machine, control enablement, capability banner, action/timing forms, log and error formatting |
+| `ui/script_panel.py` | The AutoScript panel: open, reload, dry run, run - content from `models.script_view` |
 | `ui/run_bridge.py` | The single worker-thread → Qt-thread boundary |
 | `ui/main_window.py` | Window assembly, service wiring, unsaved-change tracking |
 | `ui/profile_panel.py` | Profile picker, New/Save/Duplicate/Delete/Import/Export |

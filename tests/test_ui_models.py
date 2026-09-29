@@ -503,3 +503,33 @@ def test_typing_style_values_offer_a_starting_rate_when_there_is_none() -> None:
 def test_a_rate_outside_the_panel_range_is_clamped_not_rejected() -> None:
     assert typing_style_with_rate(TypingStyle(), enabled=True, percent=500.0).typo_rate == 1.0
     assert typing_style_with_rate(TypingStyle(), enabled=True, percent=-5.0).typo_rate == 0.0
+
+
+# -- AutoScript -------------------------------------------------------------
+def test_a_script_step_is_logged_by_its_line() -> None:
+    from human_input_automation.core.autoscript.runner import StepStarted
+
+    line = format_event(StepStarted(12, "run `ls`"), timestamp=datetime(2026, 1, 1, 9, 30))
+    assert line == "09:30:00  Line 12: run `ls`"
+
+
+def test_the_script_panel_starts_empty_and_offers_nothing_to_run() -> None:
+    from human_input_automation.ui.models import script_view
+
+    view = script_view(None)
+    assert not view.has_script and not view.can_run and not view.can_dry_run
+
+
+def test_repeated_reasons_are_one_row_with_their_lines(tmp_path: Any) -> None:
+    from human_input_automation.application.autoscript import check_script_for_host
+    from human_input_automation.ui.models import script_view
+
+    path = tmp_path / "s.md"
+    body = "".join("- screenshot\n" for _ in range(10))
+    path.write_text(f"# T\n\nPlatform: macOS\nApp: Finder\n\n## S\n\n{body}", "utf-8")
+    view = script_view(check_script_for_host(path, ()))
+
+    assert view.problems == (
+        "lines 8, 9, 10, 11, 12, 13, 14, 15 and 2 more: "
+        "needs screen reading, which arrives in roadmap 8.3",
+    )

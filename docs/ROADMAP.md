@@ -196,7 +196,91 @@ Blocked — no machine available:
 - [ ] Build the Windows and macOS artifacts (their CI jobs have never run)
 - [ ] macOS signing and notarization (no credentials)
 
-## Phase 8 — Advanced
+## Phase 8 — Running written work steps
+
+### 8.0 — Input a body could have produced (done)
+
+- [x] Typing that mistypes a neighbouring key, pauses and corrects it, and
+      always leaves the text that was asked for
+- [x] Pointer movement along a bowed path with a bell-shaped speed, optional
+      overshoot and correction, and Fitts's-law duration - planned in the core
+      from the run's seed, replayed by the adapter
+- [x] Both verified on a real X server against a window that recorded what it
+      actually received
+
+The work in `refer/AutoScript/` is five guides written for a person: ordered
+stages, each in a named application, driven by data tables, checked against
+stated expectations. `docs/AUTOSCRIPT.md` argues for a small declarative
+language inside Markdown to carry them, and `examples/autoscript/` holds the
+first guide translated into it.
+
+### 8.1 — The language (parser and validator done)
+
+- [x] Grammar written as motor primitives: the script says what the body does
+      (`docs/AUTOSCRIPT.md`)
+- [x] Four guides converted by Claude from the spec alone
+      (`examples/autoscript/`) - the conformance corpus, and the source of
+      every grammar decision since: numbered lines are prose, `containing`,
+      label normalisation, `type table` headers, routine scope
+- [x] Parser: Markdown document -> stages, steps, tables, blocks, routines;
+      every problem reported with its line, never only the first
+- [x] Validator: every name defined before use, routines called as declared,
+      tables there to loop over, a terminal wherever a command is run, and
+      no look at the screen through a stale screenshot - followed through
+      loops (second time round included) and routine calls
+- [x] `--check-script`: compiler-style output, UNSUPPORTED and CHECK notes
+      listed, exit status for batch use; never runs a step
+- [x] Rendering: `--run-script --dry-run` walks every step, loops and routines
+      included, through recording ports, and estimates the run's length
+
+### 8.2 — Terminal tasks, end to end (runner done; macOS not yet run)
+
+- [x] `--run-script`: `App:`, `run`, `type`/`type block`/`type table`,
+      `key-click`, pointer steps with coordinates, `wait for window`,
+      `expect`, `read output`, `record`, `for each`, `repeat`, routines
+- [x] Terminal output read back exactly, not by OCR: AppleScript for
+      Terminal and iTerm2 on macOS, `tmux` on Linux
+- [x] A `run` waits for the command before it to finish
+- [x] Focus checked before every keystroke; never into the program running
+      the script; refused up front when a script drives its own host app
+- [x] Verified on Linux/X11 in an isolated X server with xterm and tmux
+      (PHASE6 report), including focus moved away mid-step
+- [ ] Verified on macOS with Terminal and iTerm2
+- [ ] Guide 1 runs unattended against a scratch database, and stops on the
+      first expectation that does not hold
+- [x] An AutoScript panel in the window (Open script..., Reload, Dry run
+      script, Run script), reusing the same runner and the Timing panel
+
+The highest-value target and the one with no pixel-hunting in it.
+
+### 8.3 — Seeing the screen
+
+- [ ] `ScreenCapturePort`, and a capture adapter per platform
+- [ ] OCR adapter (local, small) behind an `ElementLocatorPort`
+- [ ] Template matching for elements with no text
+- [ ] The screen map: a name in a document -> how to find it in an application
+- [ ] The position picker feeds the screen map, so a canvas element can be
+      taught once by dragging
+
+### 8.4 — Accessibility locators
+
+- [ ] macOS `AXUIElement` first: it is the machine this work runs on, and the
+      permission the application already asks for
+- [ ] Windows UI Automation, AT-SPI on Linux
+- [ ] Locator tiers ordered cheapest-first, with the tier that answered
+      reported in the run log
+
+### 8.5 — A local vision model, only where the cheaper tiers fail
+
+- [ ] Measured first: which steps in the five guides actually need one
+- [ ] Runs locally; no screenshot leaves the machine
+- [ ] Behind the same `ElementLocatorPort`, as the last tier
+- [ ] Honest reporting when it is guessing
+
+### 8.6 — Recovery
+
+- [ ] `when` conditionals, for the named failures guides already document
+- [ ] Retry with backoff where a step is safe to repeat, never where it is not
 
 ## Out of scope
 

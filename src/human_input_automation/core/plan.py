@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 
 from .actions import Action, TextAction
+from .pointer_path import PointerStyle
 from .target import TargetWindow
 from .timing import TimingProfile
 from .typing_style import TypingStyle
@@ -78,6 +79,7 @@ class AutomationPlan:
     actions: tuple[Action, ...] = ()
     timing: TimingProfile = field(default_factory=TimingProfile)
     typing: TypingStyle = field(default_factory=TypingStyle)
+    pointer: PointerStyle = field(default_factory=PointerStyle)
     limits: ExecutionLimits = field(default_factory=ExecutionLimits)
     options: RunOptions = field(default_factory=RunOptions)
     name: str = ""
@@ -91,11 +93,13 @@ class AutomationPlan:
         options: RunOptions | None = None,
         name: str = "",
         typing: TypingStyle | None = None,
+        pointer: PointerStyle | None = None,
     ) -> None:
         object.__setattr__(self, "target", target)
         object.__setattr__(self, "actions", tuple(actions))
         object.__setattr__(self, "timing", timing or TimingProfile())
         object.__setattr__(self, "typing", typing or TypingStyle())
+        object.__setattr__(self, "pointer", pointer or PointerStyle())
         object.__setattr__(self, "limits", limits or ExecutionLimits())
         object.__setattr__(self, "options", options or RunOptions())
         object.__setattr__(self, "name", name)

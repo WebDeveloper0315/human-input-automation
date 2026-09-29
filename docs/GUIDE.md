@@ -106,6 +106,26 @@ Verify the download first: `sha256sum -c SHA256SUMS`.
    works as a global hotkey even when the application is not focused. Stopping
    is immediate and always releases any keys or mouse buttons being held.
 
+### Pointing at something on screen
+
+A mouse move or a click needs coordinates, and nobody knows what they are by
+looking. So don't type them: in the action's dialog, **press and drag the
+*Capture* handle to the place you mean and let go**. The dialog fades while you
+drag — the point you are aiming at is usually behind it — and the coordinates
+appear in X and Y when you release, with a line underneath saying which monitor
+they landed on, or that they landed on none.
+
+Tick *Relative to current position* first and the same drag measures a
+*movement* instead: the distance from where you pressed to where you released,
+shown as `by (-40, +12)`.
+
+The position is read through the same adapter that will move the pointer during
+the run, not from the window system, so a captured coordinate is one the run
+can reproduce — on a scaled display those two disagree. Where a host cannot
+report the pointer at all, the handle is disabled and says so; the spin boxes
+still work, and pressing Space on the handle captures wherever the pointer is
+standing, which is the version of this that works without a mouse.
+
 ### Typing into a code editor
 
 A code editor is not a text box. It indents each new line for you, closes
@@ -126,23 +146,39 @@ function test() {
 ```
 
 Use **Type into a code editor** instead. It sends the same text one line at a
-time and undoes each of those behaviours as it goes:
+time and works *with* those behaviours rather than against them: an editor that
+has just indented the line and written the closing brace has done part of the
+typing, and the fastest way through is to keep what it wrote.
 
-| Setting | What it does | When to turn it off |
+On the example above that means the indentation is never typed at all — the
+editor's is already right — and the two `}` lines are never typed either: the
+caret walks down onto the braces the editor put there. About a quarter fewer
+keystrokes, and no keystroke spent undoing one of the editor's.
+
+The settings describe **your editor**, and the keystrokes follow from them:
+
+| Setting | Options | Notes |
 | --- | --- | --- |
-| *Indentation: replace what the editor indents* | Selects the indentation the editor just inserted and types over it, so the code arrives exactly as written. | Choose *let the editor indent it* if you would rather have the editor's own layout, or *type as written* for an editor that does nothing on Enter. |
-| *Delete brackets the editor closes* | After a line that leaves a bracket open, presses Delete once per open bracket to remove the partner the editor added. | **Turn this off for an editor that does not close brackets** — the Delete would take a real character instead. |
-| *Press Escape before each new line* | Closes the completion popup, so Enter starts a new line instead of accepting a suggestion. | If you drive an editor where Escape does something else (Vim mode, for instance). |
-| *Select to line start with* | The chord used to select the editor's indentation. `shift+home` works in VS Code everywhere; `meta+shift+left` is the native macOS one. | — |
+| *Indentation* | **Keep the editor's, type the difference** (default) · Replace what the editor indents · Let the editor decide the layout · The editor does not indent | The default usually types nothing at all. Replacing is slower by a chord and an indent on every line, and is the one that assumes nothing — use it if your editor indents in a way this cannot predict. |
+| *Closing brackets* | **Reuse the bracket the editor closes** (default) · Delete it and type my own · The editor closes nothing | **Choose the last one for an editor that does not close brackets** — the other two would press Delete at a character of yours. |
+| *Columns per level* | `0` = read it from the text (default), or 1–16 | Set this to your editor's tab size if it differs from the code you are typing. It decides where the caret lands after a new line. |
+| *Press Escape before each new line* | on by default | Closes the completion popup, so Enter and the arrow keys move the caret instead of accepting a suggestion. Turn it off for an editor where Escape means something else — Vim mode, for instance. |
+| *Select to line start with* | `shift+home` (default) or `meta+shift+left` | Used when the indentation has to be replaced. The second is the native macOS chord. |
 
-None of this can ask the editor what it is about to do; each setting is a
-keystroke that assumes a behaviour. The defaults match VS Code. Run a **dry
-run** and then a real one into a scratch file the first time you point it at a
-new editor.
+Nothing here can ask the editor what it just did, so the defaults are a
+description of VS Code. Run a **dry run** and then a real one into a scratch
+file the first time you point it at a new editor.
+
+If the description is wrong, the text still arrives in full — it is the *shape*
+that goes wrong, and nothing of yours is deleted to get there. Telling it four
+columns when the editor uses two gives you the same code indented in twos.
+Telling it your editor indents after a `:` when it does not gives you a flat
+block. Both are fixed by correcting the setting, or by choosing *replace what
+the editor indents*, which asks the editor for nothing.
 
 Two known limits: a blank line keeps whatever indentation the editor gave it,
-and a line that ends inside an unterminated string can leave one bracket behind.
-Both leave characters in the file rather than removing yours.
+and a line that ends inside an unterminated string can leave one bracket
+behind. Both leave characters in the file rather than removing yours.
 
 ### How much one run may do
 
@@ -155,6 +191,34 @@ The hour is not a separate opinion: 20 000 characters at the default pace take
 about 27 minutes to type. If a plan's text cannot be typed inside the time
 limit, the run log says so before anything is sent, because the limit is
 checked between actions and would otherwise drop the end of your plan.
+
+### How the pointer moves
+
+By default the pointer moves the way an arm moves a mouse: along an arc rather
+than a line, accelerating out of the start and braking into the target, now and
+then overshooting by a few pixels and coming back. A long reach takes longer
+than a short one, roughly as Fitts's law says a real one does. This is motor
+behaviour - what a body, or a humanoid robot, does with its hand - and it is
+what makes a recorded run legible to someone watching it.
+
+It is not a claim that the input is indistinguishable from a person's, and it
+changes nothing the operating system reports about where input came from:
+synthetic input stays synthetic.
+
+Measured on a 894-pixel move: the path strays about 60 px from the straight
+line, and just over half the distance is covered in the middle third of the
+time. The same move with the box unticked covers a third of the distance in
+each third of the time, in a dead straight line.
+
+Untick *Move the pointer the way a hand does* in the Timing panel for the
+straight version. Either way the pointer **lands exactly on the target** and
+the movement takes exactly as long as it was asked to.
+
+While travelling it stays a few pixels inside the edge of the desktop. On macOS
+the edge itself does things - a corner fires Hot Corners, the bottom edge
+reveals an auto-hidden Dock, the top edge reveals the menu bar over a
+full-screen window - and a reach that brushed it would change what is on
+screen. A target *on* the edge is still reached exactly.
 
 ### Typing with mistakes
 
@@ -191,6 +255,54 @@ Only a resolved target enables Start. If several windows match, the application
 asks; it never picks for you and never falls back to the focused window.
 Profiles are plain JSON in your user directory (`docs/PROFILE-FORMAT.md`), and
 contain no commands or scripts — they cannot execute anything.
+
+### Running an AutoScript
+
+A guide converted into AutoScript (`docs/AUTOSCRIPT.md`, `docs/CONVERT-PROMPT.md`)
+is checked, walked through, then run. In the window, the **AutoScript** panel
+does all three:
+
+1. **Open script...** — choose the `.md` file. It is checked at once; errors,
+   and lines this version cannot run yet, are listed under it. Nothing runs.
+2. **Dry run script** — every step, loops and routines unrolled, appears in the
+   *Dry run / preview* panel with an estimated duration. Nothing is sent.
+3. **Run script** — the file is read and checked again (so edits since opening
+   count), you are asked to confirm and shown which applications it will use,
+   then the countdown from the Run row starts. The window minimises if
+   *Minimise while running* is ticked; the emergency stop stays on screen.
+   Each step is logged by its line number in the run log.
+
+The script types and moves with the **Timing** panel's settings — delays,
+mistakes and pointer style — exactly as a plan does. **Reload** reads the file
+again after you edit it. The same from a terminal:
+
+```bash
+human-input-automation --check-script task.md          # errors, with lines
+human-input-automation --run-script task.md --dry-run  # every step; sends nothing
+human-input-automation --run-script task.md            # type RUN, 5 s countdown, go
+```
+
+This version runs terminal work and anything done with keys and fixed
+coordinates. A script with `screenshot`, `find` or a label to move to is
+refused before anything is sent, with each line named — that arrives with
+screen reading (roadmap 8.3).
+
+* **Start it from a different application than the one it drives.** On macOS,
+  a script that works in Terminal must be started from iTerm2 or VS Code's
+  terminal; the run refuses otherwise, because keys sent to its own window
+  would run as commands afterwards.
+* **Terminal output** is read from Terminal or iTerm2 through AppleScript: the
+  first run makes macOS ask whether this program may control the terminal
+  (Privacy & Security → Automation). On Linux, run the shell in `tmux`.
+* **Stop** with Ctrl+C in the starting window, or the emergency hotkey. The run
+  also stops by itself, before the next key, if focus moves to another
+  application.
+* From the command line, `--mistakes 0` types exactly (the default mistypes
+  about 2% of letters and corrects them), `--yes` skips the confirmation and
+  `--countdown N` sets the wait.
+* **Starting the window from Terminal.app** makes Terminal the program's own
+  host, so a script that drives Terminal is refused. Start the window from
+  iTerm2 or VS Code's terminal instead.
 
 ---
 

@@ -7,9 +7,11 @@ implement policy (timing, sequencing, retries) - that lives in the engine.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Protocol, runtime_checkable
 
 from ..core.keys import KeyLike, MouseButton
+from ..core.pointer_path import PathPoint
 from .clock import CancelToken
 
 
@@ -36,6 +38,18 @@ class MousePort(Protocol):
 
     def position(self) -> tuple[int, int]:
         """Current pointer position in screen coordinates."""
+        ...
+
+    def follow_path(
+        self, path: Sequence[PathPoint], cancel: CancelToken | None = None
+    ) -> None:
+        """Walk a timed path, one position write per point, on schedule.
+
+        The shape and the timing were decided in the core; an implementation
+        only replays them. It must abandon the path as soon as ``cancel``
+        reports a stop, leaving the pointer where it had got to - a stop is
+        never worth waiting out the rest of a movement for.
+        """
         ...
 
     def move_to(

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from human_input_automation.core.actions import AUTO_CLOSED_PAIRS as _CLOSERS
 from human_input_automation.core.keys import Key, KeyLike, MouseButton, format_key
@@ -87,8 +88,19 @@ class FakeMouse:
     durations_ms: list[float] = field(default_factory=list)
     _position: tuple[int, int] = (0, 0)
 
+    #: Every path the engine asked for, so a test can look at its shape.
+    paths: list[list[tuple[int, int]]] = field(default_factory=list)
+
     def position(self) -> tuple[int, int]:
         return self._position
+
+    def follow_path(self, path: Any, cancel: CancelToken | None = None) -> None:
+        points = [(point.x, point.y) for point in path]
+        self.paths.append(points)
+        if points:
+            self._position = points[-1]
+        self.calls.append(("follow_path", f"{len(points)}"))
+        self.durations_ms.append(path[-1].at_ms if points else 0.0)
 
     def move_to(
         self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
@@ -123,6 +135,10 @@ class FakeWindows:
     activate_result: bool = True
     active_result: bool | None = True
     calls: list[str] = field(default_factory=list)
+    #: What ``active_window`` reports; a script run follows it through
+    #: ``activate`` unless a test pins it.
+    active: TargetWindow | None = None
+    follow_activation: bool = True
 
     def list_windows(self) -> Sequence[TargetWindow]:
         return list(self.windows)
@@ -132,11 +148,16 @@ class FakeWindows:
 
     def activate(self, target: TargetWindow, cancel: object = None) -> bool:
         self.calls.append(f"activate:{target.handle}")
+        if self.activate_result and self.follow_activation:
+            self.active = target
         return self.activate_result
 
     def is_active(self, target: TargetWindow) -> bool | None:
         self.calls.append(f"is_active:{target.handle}")
         return self.active_result
+
+    def active_window(self) -> TargetWindow | None:
+        return self.active
 
 
 def make_target(
@@ -227,6 +248,7 @@ class FakeEditor:
         auto_close: bool = True,
         auto_complete: bool = True,
         indent_unit: str = "    ",
+        indent_after: str = "([{:",
         text: str = "",
     ) -> None:
         self.lines = text.split("\n")
@@ -236,6 +258,9 @@ class FakeEditor:
         self.auto_close = auto_close
         self.auto_complete = auto_complete
         self.indent_unit = indent_unit
+        #: What makes it indent the next line. VS Code indents after an opening
+        #: bracket in the C family and after a colon in Python.
+        self.indent_after = indent_after
         self.anchor: tuple[int, int] | None = None
         self.held: set[KeyLike] = set()
         #: Closers the editor inserted, innermost last, sitting right of the caret.
@@ -289,6 +314,12 @@ class FakeEditor:
             self._home()
         elif key is Key.END:
             self._move(self.row, len(self.line))
+        elif key is Key.DOWN:
+            row = min(len(self.lines) - 1, self.row + 1)
+            self._move(row, min(self.col, len(self.lines[row])))
+        elif key is Key.UP:
+            row = max(0, self.row - 1)
+            self._move(row, min(self.col, len(self.lines[row])))
         elif key is Key.LEFT:
             self._move(self.row, max(0, self.col - 1))
         elif key is Key.RIGHT:
@@ -348,7 +379,8 @@ class FakeEditor:
         before, after = self.line[: self.col], self.line[self.col :]
         indent = before[: len(before) - len(before.lstrip())] if self.auto_indent else ""
         opener = before.rstrip()[-1:] if self.auto_indent else ""
-        deeper = indent + self.indent_unit if opener in _CLOSERS and opener else indent
+        opens_block = bool(opener) and opener in self.indent_after
+        deeper = indent + self.indent_unit if opens_block else indent
 
         self.lines[self.row] = before
         if opener in _CLOSERS and opener and after[:1] == _CLOSERS[opener]:

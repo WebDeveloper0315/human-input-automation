@@ -12,10 +12,12 @@ whole run reproducible - which is what the tests rely on.
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass, replace
 
 from .errors import ValidationError, ValidationIssue
+from .pointer_path import PointerStyle, movement_duration_ms
 from .typing_style import TypingStyle
 
 DEFAULT_PUNCTUATION = ".,;:!?"
@@ -125,9 +127,10 @@ class TimingProfile:
 class TimingService:
     """Turns a :class:`TimingProfile` into concrete delays.
 
-    It also carries the run's :class:`~.typing_style.TypingStyle`, which decides
-    how faithfully text is typed. The two travel together because both are read
-    by the same handlers and both draw on the same seeded generator.
+    It also carries the run's :class:`~.typing_style.TypingStyle` and
+    :class:`~.pointer_path.PointerStyle`, which decide how faithfully text is
+    typed and how the pointer travels. All three go together because the same
+    handlers read them and all of them draw on one seeded generator.
 
     Deterministic when constructed with a seed: the same seed and the same
     sequence of calls always produce the same delays.
@@ -138,11 +141,13 @@ class TimingService:
         profile: TimingProfile | None = None,
         *,
         style: TypingStyle | None = None,
+        pointer: PointerStyle | None = None,
         seed: int | None = None,
         rng: random.Random | None = None,
     ) -> None:
         self.profile = profile or TimingProfile()
         self.style = style or TypingStyle()
+        self.pointer = pointer or PointerStyle()
         self._rng = rng if rng is not None else random.Random(seed)
         self._seed = seed
 
@@ -198,12 +203,27 @@ class TimingService:
             return 0.0
         return max(0.0, self._sample(profile.action_delay_ms, profile.action_jitter_ms))
 
-    def mouse_move_duration_ms(self, override_ms: float | None = None) -> float:
-        """How long a pointer movement should take."""
+    def mouse_move_duration_ms(
+        self,
+        override_ms: float | None = None,
+        *,
+        distance_from: tuple[int, int] | None = None,
+        to: tuple[int, int] | None = None,
+    ) -> float:
+        """How long a pointer movement should take.
+
+        An explicit duration on the action is used verbatim - it was asked
+        for. Otherwise the profile's duration describes a normal hop, and the
+        distance stretches it the way Fitts's law says a reach stretches.
+        """
         if override_ms is not None:
             return max(0.0, override_ms)
         profile = self.profile
-        return max(0.0, self._sample(profile.mouse_move_duration_ms, profile.mouse_move_jitter_ms))
+        base = max(0.0, self._sample(profile.mouse_move_duration_ms, profile.mouse_move_jitter_ms))
+        if distance_from is None or to is None:
+            return base
+        distance = math.dist(distance_from, to)
+        return movement_duration_ms(distance, base, self.pointer)
 
     def key_repeat_delay_ms(self) -> float:
         """Delay between repetitions of the same key press."""

@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import Any
 
 from ..adapters.hotkeys import HotkeySupport
+from ..application.autoscript import ScriptCheck
 from ..application.profiles import LoadedProfile, ProfileState
 from ..core.actions import (
     DEFAULT_LINE_START_CHORD,
@@ -30,11 +31,14 @@ from ..core.actions import (
     MouseDown,
     MouseMove,
     MouseUp,
+    PairMode,
     Shortcut,
     TypeCode,
     TypeText,
     Wait,
 )
+from ..core.autoscript.model import UseApp, walk
+from ..core.autoscript.runner import ScriptOutcome, StepStarted
 from ..core.capabilities import CapabilityName, CapabilityState
 from ..core.errors import ValidationError
 from ..core.events import (
@@ -53,6 +57,8 @@ from ..core.events import (
     TargetActivated,
 )
 from ..core.keys import MouseButton, normalize_key, parse_shortcut
+from ..core.pointer_path import PointerStyle
+from ..core.screen import ScreenGeometry
 from ..core.target import PlatformName, PlatformReport, TargetWindow
 from ..core.timing import TimingProfile, TimingService
 from ..core.typing_style import TypingStyle
@@ -612,6 +618,55 @@ def profile_choices(summaries: Sequence[object]) -> list[tuple[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# Screen positions
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PointerSource:
+    """How the action editor reads the desktop while picking a position.
+
+    Injected rather than imported so the widgets stay free of adapters: the
+    application layer knows which port can answer, and the dialog only knows
+    that something can.
+    """
+
+    #: The pointer's position, or ``None`` when this host cannot report it.
+    position: Callable[[], tuple[int, int] | None]
+    #: The monitor layout, used to say where a captured point landed.
+    geometry: Callable[[], ScreenGeometry] = ScreenGeometry.unknown
+
+    @property
+    def can_read_pointer(self) -> bool:
+        return self.position() is not None
+
+
+def position_readout(
+    value: tuple[int, int] | None,
+    *,
+    relative: bool = False,
+    screen: ScreenGeometry | None = None,
+) -> str:
+    """The line beside the picker: what was captured, and where it lands.
+
+    Naming the monitor is worth the space on a multi-monitor desktop, where a
+    plausible-looking pair of numbers can still be on the wrong screen - and
+    where a point on no monitor at all is a plan that will fail validation.
+    """
+    if value is None:
+        return "Not set - drag, or type the numbers."
+    x, y = value
+    if relative:
+        return f"by ({x:+d}, {y:+d}) from wherever the pointer starts"
+    if screen is None or not screen.is_known:
+        return f"({x}, {y})"
+    monitor = screen.monitor_at(x, y)
+    if monitor is None:
+        return f"({x}, {y}) - not on any monitor"
+    return f"({x}, {y}) on {monitor.name}"
+
+
+# ---------------------------------------------------------------------------
 # Action forms
 # ---------------------------------------------------------------------------
 
@@ -661,14 +716,22 @@ def _build_type_text(values: Mapping[str, Any], delay: float | None) -> Action:
     return TypeText(text=str(values.get("text", "")), delay_after_ms=delay)
 
 
-#: Readable names for the indentation modes. The stored value stays the short
-#: enum member, so the file format does not carry a label the UI may reword.
+#: Readable names for the editor modes. The stored value stays the short enum
+#: member, so the file format does not carry a label the UI may reword.
 INDENT_LABELS: dict[IndentMode, str] = {
+    IndentMode.MATCH: "Keep the editor's, type the difference",
     IndentMode.RECLAIM: "Replace what the editor indents",
-    IndentMode.EDITOR: "Let the editor indent it",
-    IndentMode.OFF: "Type the indentation as written",
+    IndentMode.EDITOR: "Let the editor decide the layout",
+    IndentMode.OFF: "The editor does not indent",
 }
 _INDENT_BY_LABEL = {label: mode for mode, label in INDENT_LABELS.items()}
+
+PAIR_LABELS: dict[PairMode, str] = {
+    PairMode.REUSE: "Reuse the bracket the editor closes",
+    PairMode.DELETE: "Delete it and type my own",
+    PairMode.OFF: "The editor closes nothing",
+}
+_PAIRS_BY_LABEL = {label: mode for mode, label in PAIR_LABELS.items()}
 
 #: Chords that select from the caret to the start of the line. The first works
 #: in VS Code on every platform; the second is what a native macOS editor wants.
@@ -676,11 +739,13 @@ LINE_START_CHORDS: tuple[str, ...] = (DEFAULT_LINE_START_CHORD, "meta+shift+left
 
 
 def _build_type_code(values: Mapping[str, Any], delay: float | None) -> Action:
-    indent = values.get("indent", INDENT_LABELS[IndentMode.RECLAIM])
+    indent = str(values.get("indent", INDENT_LABELS[IndentMode.MATCH]))
+    pairs = str(values.get("pairs", PAIR_LABELS[PairMode.REUSE]))
     return TypeCode(
         text=str(values.get("text", "")),
-        indent=_INDENT_BY_LABEL.get(str(indent), IndentMode.RECLAIM),
-        drop_auto_pairs=bool(values.get("drop_auto_pairs", True)),
+        indent=_INDENT_BY_LABEL.get(indent, IndentMode.MATCH),
+        pairs=_PAIRS_BY_LABEL.get(pairs, PairMode.REUSE),
+        indent_width=int(values.get("indent_width", 0) or 0),
         dismiss_suggestions=bool(values.get("dismiss_suggestions", True)),
         line_start_chord=str(values.get("line_start_chord") or DEFAULT_LINE_START_CHORD),
         delay_after_ms=delay,
@@ -692,7 +757,8 @@ def _type_code_values(action: Action) -> dict[str, Any]:
     return {
         "text": action.text,
         "indent": INDENT_LABELS[action.indent],
-        "drop_auto_pairs": action.drop_auto_pairs,
+        "pairs": PAIR_LABELS[action.pairs],
+        "indent_width": action.indent_width,
         "dismiss_suggestions": action.dismiss_suggestions,
         "line_start_chord": action.line_start_chord,
     }
@@ -786,21 +852,37 @@ ACTION_SPECS: tuple[ActionSpec, ...] = (
                 "indent",
                 "Indentation",
                 FieldKind.CHOICE,
-                default=INDENT_LABELS[IndentMode.RECLAIM],
+                default=INDENT_LABELS[IndentMode.MATCH],
                 choices=tuple(INDENT_LABELS.values()),
                 help_text=(
-                    "An editor indents each new line for you. Replacing that keeps the code "
-                    "exactly as written; leaving it lets the editor decide the layout."
+                    "An editor indents each new line for you. Keeping that and typing only "
+                    "the difference is fastest and usually types nothing at all; replacing it "
+                    "is slower but assumes nothing about what the editor did."
                 ),
             ),
             FieldSpec(
-                "drop_auto_pairs",
-                "Delete brackets the editor closes",
-                FieldKind.BOOL,
-                default=True,
+                "pairs",
+                "Closing brackets",
+                FieldKind.CHOICE,
+                default=PAIR_LABELS[PairMode.REUSE],
+                choices=tuple(PAIR_LABELS.values()),
                 help_text=(
-                    "Assumes the editor closes brackets for you, as VS Code does. Turn it off "
-                    "for an editor that does not: the Delete would take a real character."
+                    "An editor that closes a bracket for you has already written the line "
+                    "you were going to type. Reusing walks down onto it. Choose the last "
+                    "option for an editor that closes nothing: the others would press Delete "
+                    "at a character of yours."
+                ),
+            ),
+            FieldSpec(
+                "indent_width",
+                "Columns per level",
+                FieldKind.INT,
+                default=0,
+                minimum=0,
+                maximum=16,
+                help_text=(
+                    "0 reads it from the text. Set it to your editor's tab size when they "
+                    "differ - it decides where the caret lands after a new line."
                 ),
             ),
             FieldSpec(
@@ -1129,6 +1211,11 @@ def typing_style_to_values(style: TypingStyle) -> dict[str, Any]:
     }
 
 
+def pointer_style_to_values(style: PointerStyle) -> dict[str, Any]:
+    """Panel values for an existing pointer style."""
+    return {"natural": not style.is_direct}
+
+
 def preview_delays(
     profile: TimingProfile,
     *,
@@ -1184,6 +1271,8 @@ def _event_text(event: RunEvent) -> str | None:
         return f"Action {event.index + 1}: {event.description}"
     if isinstance(event, ActionCompleted):
         return None
+    if isinstance(event, StepStarted):
+        return f"Line {event.line}: {event.description}"
     if isinstance(event, RunPaused):
         return f"Paused before action {event.index + 1}"
     if isinstance(event, RunResumed):
@@ -1288,3 +1377,120 @@ def dry_run_view(
         result=friendly_error(report),
         warnings=tuple(issue.message for issue in report.issues if issue.severity == "warning"),
     )
+
+
+# ---------------------------------------------------------------------------
+# AutoScript
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ScriptView:
+    """What the script panel shows for the script that is open, if any."""
+
+    title: str = "No script open"
+    summary: str = "Open an AutoScript file (.md) to check it, preview it and run it."
+    problems: tuple[str, ...] = ()
+    has_script: bool = False
+    can_dry_run: bool = False
+    can_run: bool = False
+
+
+def script_view(check: ScriptCheck | None) -> ScriptView:
+    """The panel's content for a checked script."""
+    if check is None:
+        return ScriptView()
+    script = check.script
+    name = check.path.replace("\\", "/").rsplit("/", 1)[-1]
+    title = f"{script.title} ({name})" if script.title else name
+    report = check.report
+    problems = _grouped_refusals(check)
+    if not report.ok:
+        summary = f"{len(report.errors)} error(s) - fix the script, then Reload."
+    elif check.refusals:
+        summary = (
+            f"{script.step_count} step(s). Cannot be run here yet "
+            f"({len(check.refusals)} line(s) below); Dry run still works."
+        )
+    else:
+        apps = ", ".join(script_applications(check)) or "none"
+        summary = (
+            f"{len(script.stages)} stage(s), {script.step_count} step(s). "
+            f"Applications: {apps}."
+        )
+    warnings = tuple(f"line {_digits(w.location)}: warning: {w.message}" for w in report.warnings)
+    return ScriptView(
+        title=title,
+        summary=summary,
+        problems=problems + warnings,
+        has_script=True,
+        can_dry_run=check.can_dry_run,
+        can_run=check.can_run,
+    )
+
+
+def _grouped_refusals(check: ScriptCheck, shown: int = 8) -> tuple[str, ...]:
+    """One row per reason, with its lines: 89 identical rows say less than one."""
+    lines: dict[str, list[int]] = {}
+    for refusal in check.refusals:
+        lines.setdefault(refusal.message, []).append(refusal.line)
+    rows = []
+    for message, numbers in lines.items():
+        listed = ", ".join(str(n) for n in numbers[:shown])
+        more = f" and {len(numbers) - shown} more" if len(numbers) > shown else ""
+        label = "line" if len(numbers) == 1 else "lines"
+        rows.append(f"{label} {listed}{more}: {message}")
+    return tuple(rows)
+
+
+def script_applications(check: ScriptCheck) -> tuple[str, ...]:
+    """Every application the script names, in order of first use."""
+    script = check.script
+    bodies = [stage.steps for stage in script.stages]
+    bodies += [routine.steps for routine in script.routines.values()]
+    names: dict[str, None] = {}
+    for steps in bodies:
+        for step in walk(steps):
+            if isinstance(step, UseApp):
+                names.setdefault(step.name, None)
+    return tuple(names)
+
+
+def script_run_confirmation(check: ScriptCheck) -> str:
+    """The question asked before a script takes over the keyboard and mouse."""
+    apps = ", ".join(script_applications(check)) or "no application"
+    return (
+        f"Run \"{check.script.title or check.path}\"?\n\n"
+        f"It will type and click in: {apps}.\n"
+        f"{check.script.step_count} step(s). Commands in the script are typed into "
+        "the terminal and run as written.\n\n"
+        "Keep your hands off the keyboard and mouse. The run stops by itself if "
+        "another application takes focus, and the emergency stop works throughout."
+    )
+
+
+def script_dry_run_view(
+    check: ScriptCheck, outcome: ScriptOutcome, steps: Sequence[StepStarted]
+) -> DryRunView:
+    """The preview panel's content after walking a script."""
+    minutes = outcome.elapsed_ms / 60000
+    lines = tuple(f"line {step.line}: {step.description}" for step in steps)
+    unsupported = tuple(r.message for r in check.refusals)
+    if outcome.ok:
+        result = f"Walked through {outcome.steps_done} step(s). No input was sent."
+    else:
+        where = f" at line {outcome.failed_line}" if outcome.failed_line else ""
+        result = f"The walk-through stopped{where}: {outcome.error}"
+    return DryRunView(
+        target_text=f"Script: {check.script.title or check.path}",
+        estimated_duration=(
+            f"Estimated duration: {minutes:.1f} min, not counting screen steps"
+        ),
+        lines=lines,
+        result=result,
+        warnings=tuple(dict.fromkeys(unsupported)),
+    )
+
+
+def _digits(location: str) -> str:
+    return "".join(ch for ch in location if ch.isdigit()) or "0"

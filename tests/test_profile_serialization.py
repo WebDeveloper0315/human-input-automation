@@ -39,6 +39,7 @@ from human_input_automation.core.actions import (
     MouseDown,
     MouseMove,
     MouseUp,
+    PairMode,
     Shortcut,
     TypeCode,
     TypeText,
@@ -59,7 +60,8 @@ ALL_ACTIONS: list[Action] = [
     TypeCode(
         text="if (x) {\n}",
         indent=IndentMode.EDITOR,
-        drop_auto_pairs=False,
+        pairs=PairMode.DELETE,
+        indent_width=2,
         dismiss_suggestions=False,
         line_start_chord="meta+shift+left",
         delay_after_ms=5.0,
@@ -238,10 +240,136 @@ def test_an_unknown_typing_field_is_rejected() -> None:
         plan_from_dict({"actions": [], "typing": {"undetectable": True}})
 
 
+def test_a_schema_1_profile_is_migrated_to_the_new_editor_settings() -> None:
+    """The v1 flag recorded a fact about the editor; v2 keeps the fact.
+
+    ``drop_auto_pairs`` said "this editor closes brackets, remove them". The
+    fact survives; the strategy is now the planner's, and it reuses them.
+    """
+    old = {
+        "schema": 1,
+        "name": "From version 1",
+        "target": {},
+        "plan": {
+            "actions": [
+                {
+                    "type": "type_code",
+                    "text": "if (x) {\n    go();\n}",
+                    "indent": "reclaim",
+                    "drop_auto_pairs": True,
+                    "dismiss_suggestions": True,
+                    "line_start_chord": "shift+home",
+                    "delay_after_ms": None,
+                }
+            ]
+        },
+    }
+    profile = profile_from_dict(old)
+
+    assert profile.plan is not None
+    action = profile.plan.actions[0]
+    assert isinstance(action, TypeCode)
+    assert action.pairs is PairMode.REUSE
+    assert action.indent is IndentMode.MATCH
+    assert action.text == "if (x) {\n    go();\n}"
+
+
+def test_a_schema_1_profile_that_said_the_editor_closes_nothing_keeps_saying_so() -> None:
+    old = {
+        "schema": 1,
+        "name": "Plain editor",
+        "target": {},
+        "plan": {
+            "actions": [
+                {
+                    "type": "type_code",
+                    "text": "x",
+                    "indent": "off",
+                    "drop_auto_pairs": False,
+                    "dismiss_suggestions": False,
+                    "line_start_chord": "shift+home",
+                    "delay_after_ms": None,
+                }
+            ]
+        },
+    }
+    action = profile_from_dict(old).plan.actions[0]  # type: ignore[union-attr]
+    assert isinstance(action, TypeCode)
+    assert action.pairs is PairMode.OFF
+    assert action.indent is IndentMode.OFF
+
+
+def test_migrating_leaves_every_other_action_alone() -> None:
+    old = {
+        "schema": 1,
+        "name": "Mixed",
+        "target": {},
+        "plan": {"actions": [{"type": "wait", "duration_ms": 25, "delay_after_ms": None}]},
+    }
+    profile = profile_from_dict(old)
+    assert profile.plan is not None
+    assert profile.plan.actions == (Wait(duration_ms=25.0),)
+
+
+def test_a_schema_2_profile_is_given_a_pointer_section() -> None:
+    """Version 2 predates the choice; the migration writes the choice down."""
+    from human_input_automation.core.pointer_path import PointerStyle
+
+    old = {
+        "schema": 2,
+        "name": "Before pointer styles",
+        "target": {},
+        "plan": {"actions": [{"type": "wait", "duration_ms": 5, "delay_after_ms": None}]},
+    }
+    migrated = migrate(old)
+    assert migrated["schema"] == 3
+    assert "pointer" in migrated["plan"]
+
+    profile = profile_from_dict(old)
+    assert profile.plan is not None
+    assert profile.plan.pointer == PointerStyle()
+
+
+def test_a_schema_2_profile_keeps_a_pointer_section_it_somehow_has() -> None:
+    old = {
+        "schema": 2,
+        "name": "x",
+        "target": {},
+        "plan": {"actions": [], "pointer": {"bow": 0.0, "bow_jitter": 0.0,
+                                             "tremor_px": 0.0, "overshoot_rate": 0.0}},
+    }
+    profile = profile_from_dict(old)
+    assert profile.plan is not None and profile.plan.pointer.is_direct
+
+
+def test_a_schema_1_profile_walks_all_the_way_to_the_current_version() -> None:
+    old = {
+        "schema": 1,
+        "name": "Oldest",
+        "target": {},
+        "plan": {"actions": [{"type": "type_code", "text": "x", "drop_auto_pairs": True}]},
+    }
+    migrated = migrate(old)
+    assert migrated["schema"] == SCHEMA_VERSION
+    assert "pointer" in migrated["plan"]
+    assert migrated["plan"]["actions"][0]["pairs"] == "reuse"
+
+
+def test_a_current_profile_needs_no_migration() -> None:
+    profile = profile_from_dict(profile_to_dict(Profile(name="Fresh")))
+    assert profile.name == "Fresh"
+
+
 def test_an_unknown_indent_mode_names_the_ones_that_exist() -> None:
     with pytest.raises(ProfileFormatError) as excinfo:
         action_from_dict({"type": "type_code", "text": "x", "indent": "magic"})
     assert "reclaim" in str(excinfo.value)
+
+
+def test_an_unknown_pair_mode_names_the_ones_that_exist() -> None:
+    with pytest.raises(ProfileFormatError) as excinfo:
+        action_from_dict({"type": "type_code", "text": "x", "pairs": "invent"})
+    assert "reuse" in str(excinfo.value)
 
 
 def test_an_unusable_line_start_chord_is_rejected() -> None:
@@ -336,10 +464,10 @@ def test_a_missing_schema_is_rejected_rather_than_guessed() -> None:
 
 def test_a_future_schema_is_rejected_explicitly() -> None:
     data = profile_to_dict(sample_profile())
-    data["schema"] = 2
+    data["schema"] = SCHEMA_VERSION + 1
     with pytest.raises(UnsupportedSchemaError) as excinfo:
         profile_from_dict(data)
-    assert str(excinfo.value) == "Unsupported profile schema version: 2"
+    assert str(excinfo.value) == f"Unsupported profile schema version: {SCHEMA_VERSION + 1}"
 
 
 @pytest.mark.parametrize("version", ["1", 1.0, True, None, [1]])
@@ -398,16 +526,24 @@ def test_current_version_needs_no_migration() -> None:
     assert migrate(data) == data
 
 
-def test_a_registered_migration_upgrades_older_data() -> None:
-    """Only version 1 exists today; the mechanism is proven with a fake one."""
+def test_a_registered_migration_walks_one_version_at_a_time() -> None:
+    """A profile several versions old is upgraded a step at a time, in order."""
+    order: list[int] = []
 
     def upgrade_zero(data: dict[str, Any]) -> dict[str, Any]:
+        order.append(0)
         data["schema"] = 1
         data["name"] = data.pop("title", "Untitled profile")
         return data
 
-    migrated = migrate({"schema": 0, "title": "Old"}, {0: upgrade_zero})
-    assert migrated["schema"] == 1 and migrated["name"] == "Old"
+    def upgrade_one(data: dict[str, Any]) -> dict[str, Any]:
+        order.append(1)
+        data["schema"] = SCHEMA_VERSION
+        return data
+
+    migrated = migrate({"schema": 0, "title": "Old"}, {0: upgrade_zero, 1: upgrade_one})
+    assert migrated["schema"] == SCHEMA_VERSION and migrated["name"] == "Old"
+    assert order == [0, 1]
 
 
 def test_a_migration_that_does_not_advance_is_an_error() -> None:

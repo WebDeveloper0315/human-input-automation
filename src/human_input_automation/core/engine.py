@@ -91,6 +91,8 @@ class ExecutionContext:
         emit: Callable[[RunEvent], None],
         dry_run: bool,
         state: InputState | None = None,
+        screen: ScreenGeometry | None = None,
+        guard: Callable[[], None] | None = None,
     ) -> None:
         self.keyboard = keyboard
         self.mouse = mouse
@@ -100,6 +102,12 @@ class ExecutionContext:
         self.emit = emit
         self.dry_run = dry_run
         self.state = state or InputState()
+        #: The desktop, when it could be measured - what keeps the pointer's
+        #: journey off the edges that make macOS do things.
+        self.screen = screen
+        #: Called at every checkpoint - between keystrokes, not only between
+        #: actions - and raises to stop the run, e.g. when focus has moved.
+        self.guard = guard
         self.index = 0
 
     # -- cooperative cancellation -----------------------------------------
@@ -111,6 +119,8 @@ class ExecutionContext:
             self.control.wait_while_paused()
             self.control.raise_if_stopped()
             self.emit(RunResumed(self.index))
+        if self.guard is not None:
+            self.guard()
 
     def sleep_ms(self, milliseconds: float) -> None:
         """Interruptible delay: a stop request ends it immediately."""
@@ -239,7 +249,9 @@ class AutomationEngine:
             return report
 
         keyboard, mouse, windows, clock = self._ports_for(plan)
-        timing = TimingService(plan.timing, style=plan.typing, seed=plan.options.seed)
+        timing = TimingService(
+            plan.timing, style=plan.typing, pointer=plan.pointer, seed=plan.options.seed
+        )
         ctx = ExecutionContext(
             keyboard=keyboard,
             mouse=mouse,
@@ -248,6 +260,7 @@ class AutomationEngine:
             clock=clock,
             emit=emit,
             dry_run=plan.options.dry_run,
+            screen=screen,
         )
 
         started_at = clock.monotonic()

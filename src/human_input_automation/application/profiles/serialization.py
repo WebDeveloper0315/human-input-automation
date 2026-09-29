@@ -38,6 +38,7 @@ from ...core.actions import (
     MouseDown,
     MouseMove,
     MouseUp,
+    PairMode,
     Shortcut,
     TypeCode,
     TypeText,
@@ -46,6 +47,7 @@ from ...core.actions import (
 from ...core.errors import ValidationError
 from ...core.keys import Key, KeyLike, MouseButton, normalize_key
 from ...core.plan import AutomationPlan, ExecutionLimits, RunOptions
+from ...core.pointer_path import PointerStyle
 from ...core.target import DisplayServer, PlatformName, TargetWindow, WindowCapabilities
 from ...core.timing import TimingProfile
 from ...core.typing_style import TypingStyle
@@ -177,7 +179,7 @@ def _key(value: Any, location: str) -> KeyLike:
 
 
 def _encode_value(value: Any, location: str) -> Any:
-    if isinstance(value, (Key, MouseButton, IndentMode)):
+    if isinstance(value, (Key, MouseButton, IndentMode, PairMode)):
         return value.value
     if isinstance(value, (str, bool, int, float)) or value is None:
         if isinstance(value, float) and not math.isfinite(value):
@@ -209,9 +211,8 @@ def _decode_type_code(data: Mapping[str, Any], location: str, delay: float | Non
     return TypeCode(
         text=_string(data, "text", location),
         indent=_enum(IndentMode, data.get("indent"), "indent", location, defaults.indent),
-        drop_auto_pairs=_bool(
-            data, "drop_auto_pairs", location, default=defaults.drop_auto_pairs
-        ),
+        pairs=_enum(PairMode, data.get("pairs"), "pairs", location, defaults.pairs),
+        indent_width=_int(data, "indent_width", location, default=defaults.indent_width),
         dismiss_suggestions=_bool(
             data, "dismiss_suggestions", location, default=defaults.dismiss_suggestions
         ),
@@ -379,6 +380,33 @@ def typing_from_dict(data: Any, location: str = "plan.typing") -> TypingStyle:
         raise _fail("; ".join(issue.message for issue in error.issues), location) from None
 
 
+def pointer_to_dict(style: PointerStyle) -> dict[str, Any]:
+    return {field.name: getattr(style, field.name) for field in dataclasses.fields(style)}
+
+
+def pointer_from_dict(data: Any, location: str = "plan.pointer") -> PointerStyle:
+    mapping = _mapping(data, location)
+    defaults = PointerStyle()
+    allowed = {field.name for field in dataclasses.fields(PointerStyle)}
+    _reject_unknown(mapping, allowed, location)
+    try:
+        return PointerStyle(
+            scale_with_distance=_bool(
+                mapping,
+                "scale_with_distance",
+                location,
+                default=defaults.scale_with_distance,
+            ),
+            **{
+                name: _float(mapping, name, location, default=getattr(defaults, name))
+                for name in allowed
+                if name != "scale_with_distance"
+            },
+        )
+    except ValidationError as error:
+        raise _fail("; ".join(issue.message for issue in error.issues), location) from None
+
+
 def limits_to_dict(limits: ExecutionLimits) -> dict[str, Any]:
     return {field.name: getattr(limits, field.name) for field in dataclasses.fields(limits)}
 
@@ -502,6 +530,7 @@ def plan_to_dict(plan: AutomationPlan) -> dict[str, Any]:
         "actions": [action_to_dict(action) for action in plan.actions],
         "timing": timing_to_dict(plan.timing),
         "typing": typing_to_dict(plan.typing),
+        "pointer": pointer_to_dict(plan.pointer),
         "limits": limits_to_dict(plan.limits),
         "options": options_to_dict(plan.options),
     }
@@ -526,7 +555,9 @@ def plan_from_dict(
     a resolved target cannot pass :func:`validate_plan` and therefore cannot run.
     """
     mapping = _mapping(data, location)
-    _reject_unknown(mapping, {"actions", "timing", "typing", "limits", "options"}, location)
+    _reject_unknown(
+        mapping, {"actions", "timing", "typing", "pointer", "limits", "options"}, location
+    )
 
     raw_actions = mapping.get("actions")
     if not isinstance(raw_actions, list):
@@ -540,6 +571,7 @@ def plan_from_dict(
         actions=actions,
         timing=timing_from_dict(mapping.get("timing", {}), f"{location}.timing"),
         typing=typing_from_dict(mapping.get("typing", {}), f"{location}.typing"),
+        pointer=pointer_from_dict(mapping.get("pointer", {}), f"{location}.pointer"),
         limits=limits_from_dict(mapping.get("limits", {}), f"{location}.limits"),
         options=options_from_dict(mapping.get("options", {}), f"{location}.options"),
     )
@@ -549,10 +581,73 @@ def plan_from_dict(
 # Profiles and migration
 # ---------------------------------------------------------------------------
 
-#: ``from_version -> upgrade function``. Empty while only version 1 exists; the
-#: mechanism is here so a future version 2 needs one entry, not a change at
-#: every call site.
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {}
+def _upgrade_1_to_2(data: dict[str, Any]) -> dict[str, Any]:
+    """Schema 1 -> 2: ``type_code`` describes the editor, not a strategy.
+
+    Version 1 had ``drop_auto_pairs``, a boolean that meant "delete the bracket
+    the editor closed for me". What it really recorded was a fact - *this
+    editor closes brackets* - and version 2 keeps that fact while leaving the
+    strategy to the planner, which now walks onto those brackets rather than
+    deleting them. ``false`` said the opposite, that nothing is closed, so it
+    becomes ``off``.
+
+    ``reclaim`` becomes ``match`` for the same reason: it was the only way to
+    end up with the text as written, not a preference for typing over the
+    editor's indentation. ``reclaim`` remains available for anyone who wants
+    it.
+    """
+    upgraded = dict(data)
+    plan = upgraded.get("plan")
+    if isinstance(plan, Mapping):
+        actions = plan.get("actions")
+        if isinstance(actions, list):
+            upgraded["plan"] = {
+                **plan,
+                "actions": [_upgrade_action_1_to_2(action) for action in actions],
+            }
+    upgraded["schema"] = 2
+    return upgraded
+
+
+def _upgrade_action_1_to_2(action: Any) -> Any:
+    if not isinstance(action, Mapping) or action.get("type") != TypeCode.kind:
+        return action
+    upgraded = dict(action)
+    closes_brackets = upgraded.pop("drop_auto_pairs", True)
+    upgraded.setdefault(
+        "pairs", PairMode.REUSE.value if closes_brackets is not False else PairMode.OFF.value
+    )
+    if upgraded.get("indent") == IndentMode.RECLAIM.value:
+        upgraded["indent"] = IndentMode.MATCH.value
+    return upgraded
+
+
+def _upgrade_2_to_3(data: dict[str, Any]) -> dict[str, Any]:
+    """Schema 2 -> 3: the plan says how the pointer travels.
+
+    Version 2 had no ``pointer`` section because there was nothing to say: the
+    pointer went in a straight line at a constant speed, and nobody had chosen
+    that. It becomes the default hand-like movement, for the same reason
+    ``reclaim`` became ``match`` in 1 -> 2 - it was the only behaviour on
+    offer, not a preference - and because the pointer still lands on exactly
+    the same pixel, so what a profile *does* is unchanged. A profile that wants
+    the straight line back says so with the checkbox, and is then saved with
+    it written down.
+    """
+    upgraded = dict(data)
+    plan = upgraded.get("plan")
+    if isinstance(plan, Mapping) and "pointer" not in plan:
+        upgraded["plan"] = {**plan, "pointer": pointer_to_dict(PointerStyle())}
+    upgraded["schema"] = 3
+    return upgraded
+
+
+#: ``from_version -> upgrade function``. One entry per version step; a profile
+#: two versions old is walked forward one step at a time.
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    1: _upgrade_1_to_2,
+    2: _upgrade_2_to_3,
+}
 
 
 def migrate(
@@ -606,6 +701,7 @@ def profile_to_dict(profile: Profile) -> dict[str, Any]:
             "actions": [],
             "timing": timing_to_dict(TimingProfile()),
             "typing": typing_to_dict(TypingStyle()),
+            "pointer": pointer_to_dict(PointerStyle()),
             "limits": limits_to_dict(ExecutionLimits()),
             "options": options_to_dict(RunOptions()),
         },
