@@ -194,12 +194,16 @@ checked between actions and would otherwise drop the end of your plan.
 
 ### How the pointer moves
 
-A pointer that travels in a straight line at a constant speed is the clearest
-sign that nobody is holding the mouse. By default this application moves it the
-way an arm does instead: along an arc, accelerating out of the start and
-braking into the target, occasionally overshooting by a few pixels and coming
-back. A long reach takes longer than a short one, roughly as Fitts's law says a
-real one does.
+By default the pointer moves the way an arm moves a mouse: along an arc rather
+than a line, accelerating out of the start and braking into the target, now and
+then overshooting by a few pixels and coming back. A long reach takes longer
+than a short one, roughly as Fitts's law says a real one does. This is motor
+behaviour - what a body, or a humanoid robot, does with its hand - and it is
+what makes a recorded run legible to someone watching it.
+
+It is not a claim that the input is indistinguishable from a person's, and it
+changes nothing the operating system reports about where input came from:
+synthetic input stays synthetic.
 
 Measured on a 894-pixel move: the path strays about 60 px from the straight
 line, and just over half the distance is covered in the middle third of the
@@ -209,6 +213,12 @@ each third of the time, in a dead straight line.
 Untick *Move the pointer the way a hand does* in the Timing panel for the
 straight version. Either way the pointer **lands exactly on the target** and
 the movement takes exactly as long as it was asked to.
+
+While travelling it stays a few pixels inside the edge of the desktop. On macOS
+the edge itself does things - a corner fires Hot Corners, the bottom edge
+reveals an auto-hidden Dock, the top edge reveals the menu bar over a
+full-screen window - and a reach that brushed it would change what is on
+screen. A target *on* the edge is still reached exactly.
 
 ### Typing with mistakes
 

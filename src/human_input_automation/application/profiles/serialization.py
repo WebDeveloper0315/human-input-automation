@@ -622,9 +622,32 @@ def _upgrade_action_1_to_2(action: Any) -> Any:
     return upgraded
 
 
+def _upgrade_2_to_3(data: dict[str, Any]) -> dict[str, Any]:
+    """Schema 2 -> 3: the plan says how the pointer travels.
+
+    Version 2 had no ``pointer`` section because there was nothing to say: the
+    pointer went in a straight line at a constant speed, and nobody had chosen
+    that. It becomes the default hand-like movement, for the same reason
+    ``reclaim`` became ``match`` in 1 -> 2 - it was the only behaviour on
+    offer, not a preference - and because the pointer still lands on exactly
+    the same pixel, so what a profile *does* is unchanged. A profile that wants
+    the straight line back says so with the checkbox, and is then saved with
+    it written down.
+    """
+    upgraded = dict(data)
+    plan = upgraded.get("plan")
+    if isinstance(plan, Mapping) and "pointer" not in plan:
+        upgraded["plan"] = {**plan, "pointer": pointer_to_dict(PointerStyle())}
+    upgraded["schema"] = 3
+    return upgraded
+
+
 #: ``from_version -> upgrade function``. One entry per version step; a profile
 #: two versions old is walked forward one step at a time.
-MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {1: _upgrade_1_to_2}
+MIGRATIONS: dict[int, Callable[[dict[str, Any]], dict[str, Any]]] = {
+    1: _upgrade_1_to_2,
+    2: _upgrade_2_to_3,
+}
 
 
 def migrate(

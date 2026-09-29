@@ -5,7 +5,7 @@ A line-by-line translation of `refer/AutoScript/1.md` into AutoScript
 program can read it. The prose, the expectations and the order are the
 original's; only the steps have been given a grammar.
 
-Runs on: macOS
+Platform: macOS
 App: Terminal
 
 ## Sub-task 1 — Check the database and make folders
@@ -18,7 +18,7 @@ App: Terminal
 - run `ls -la`
 
 > If `legal_cases` is not in the list, run `createdb legal_cases`. In v1 the
-> expectation above stops the run instead; see §7 of the spec.
+> expectation above stops the run instead; see §9 of the spec.
 
 ## Sub-task 2 — Create the CSV (30 rows)
 
@@ -95,9 +95,9 @@ change and `run` keeps meaning "type this line and press Enter".
 - expect output contains "3 Marcus Chen"
 - expect output contains "3 Elena Rodriguez"
 
-## Routine: attorney summary
+## Routine: attorney summary (attorney, slug)
 
-Takes `attorney` and `slug`. This is the guide's own observation — "press the
+This is the guide's own observation — "press the
 Up arrow and change only the name and the file name" — written down once
 instead of three times.
 
@@ -150,8 +150,8 @@ Table: Attorneys
 ## Sub-task 14 — Total check
 
 - run `SELECT SUM(overdue_count) AS total_overdue FROM attorney_overdue_summary;`
-- read "total_overdue" as total
-- expect {{total}} == 10
+- read output as total
+- expect {{total}} contains "10"
 - run `\dt`
 - run `\dv`
 - run `\q`

@@ -5,7 +5,11 @@ sixty terminal commands and shows almost none of the language; this excerpt is
 the opposite — Finder, Preview and a menu-bar application — so it shows what
 the motor primitives look like when there is no terminal to hide behind.
 
-Runs on: macOS
+Every `find` below comes after a `screenshot` or a `wait for` with no input in
+between (§5.6), and every name that could appear twice on screen carries a role
+or a window (§5.7).
+
+Platform: macOS
 
 ## A. Folders
 
@@ -13,10 +17,6 @@ App: Finder
 
 - key-click cmd+shift+d
 - wait for window "Desktop"
-- screenshot
-- find "empty desktop area" as empty
-- move to {{empty}}
-- left-click
 - key-click cmd+shift+n
 - wait 400 ms
 - type "Classroom_Poster_Materials"
@@ -33,99 +33,62 @@ App: Finder
 - key-click enter
 
 > The guide says "Use Finder > File > New Folder". The keyboard equivalent is
-> the same action with fewer places to go wrong; where the menu is wanted
-> instead it is four steps - screenshot, find "File", move, left-click - and
-> the same again for the item.
+> the same action with fewer places to go wrong. Where the menu is wanted
+> instead, it is: screenshot, `find menu "File"`, move, left-click, then the
+> same again for `find item "New Folder"`.
 
-## B. Water cycle capture
+## Routine: save into Captures (filename)
 
-App: Finder
+Greenshot's save dialog, reached after a region has been captured.
 
-- screenshot
-- find "Water_cycle_diagram.png" as diagram
-- move to {{diagram}}
-- left-click twice
-- wait for window "Water_cycle_diagram.png"
-
-App: Greenshot
-
-- screenshot
-- find "Greenshot menu bar icon" as greenshot
-- move to {{greenshot}}
-- left-click
-- wait 300 ms
-- screenshot
-- find "Capture region" as capture_region
-- move to {{capture_region}}
-- left-click
-- wait 300 ms
-
-Now the region itself. The two corners come from the screen map, which is where
-"the diagram, without Preview's title bar and toolbar" is written down once.
-
-- find "water cycle diagram top left" as top_left
-- find "water cycle diagram bottom right" as bottom_right
-- move to {{top_left}}
-- press-button left
-- move to {{bottom_right}}
-- release-button left
-- wait for "Save"
-
-## Routine: save into Captures
-
-Takes `filename`.
-
-- screenshot
-- find "File name" as name_field
+- wait for field "File name"
+- find field "File name" as name_field
 - move to {{name_field}}
 - left-click
 - key-click cmd+a
 - type "{{filename}}"
 - key-click cmd+shift+g
-- wait 300 ms
+- wait for field "Go to the folder"
 - type "~/Desktop/Classroom_Poster_Materials/Captures"
 - key-click enter
 - wait 400 ms
 - key-click enter
 - wait for window "Preview"
 
-## B. Save it
+## Routine: capture a diagram (source, region, filename)
 
-- do "save into Captures" with filename="captured_water_cycle.png"
-
-## C. Plant cell capture
-
-Same again, with the other file. The guide repeats itself here; the script does
-not have to.
-
-## Routine: capture a diagram
-
-Takes `source`, `region`, `filename`.
+Opens `source` in Preview, captures `region` with Greenshot and saves it. The
+two corners of each region come from the screen map, which is where "the
+diagram, without Preview's title bar and toolbar" is written down once.
 
 - App: Finder
 - screenshot
-- find "{{source}}" as diagram
+- find item "{{source}}" in window "Desktop" as diagram
 - move to {{diagram}}
 - left-click twice
 - wait for window "{{source}}"
 - App: Greenshot
 - screenshot
-- find "Greenshot menu bar icon" as greenshot
+- find icon "Greenshot" as greenshot
 - move to {{greenshot}}
+- left-click
+- wait for item "Capture region"
+- find item "Capture region" as capture_region
+- move to {{capture_region}}
 - left-click
 - wait 300 ms
 - screenshot
-- find "Capture region" as capture_region
-- move to {{capture_region}}
-- left-click
 - find "{{region}} top left" as top_left
 - find "{{region}} bottom right" as bottom_right
 - move to {{top_left}}
 - press-button left
 - move to {{bottom_right}}
 - release-button left
-- wait for "Save"
 - do "save into Captures" with filename="{{filename}}"
+
+## B–C. Capture both diagrams
+
+The guide writes sections B and C out twice, differing only in three names.
 
 Table: Diagrams
 
@@ -139,23 +102,25 @@ Table: Diagrams
 
 ## D. Check resolution
 
-App: Preview
-
 - for each row in "Diagrams":
   - App: Finder
-  - screenshot
-  - find "{{filename}}" as captured
+  - key-click cmd+shift+g
+  - wait for field "Go to the folder"
+  - type "~/Desktop/Classroom_Poster_Materials/Captures"
+  - key-click enter
+  - wait for window "Captures"
+  - find item "{{filename}}" in window "Captures" as captured
   - move to {{captured}}
   - left-click twice
   - wait for window "{{filename}}"
   - App: Preview
   - key-click cmd+i
-  - wait 400 ms
-  - screenshot
+  - wait for text "Image size"
   - read "Image size" as size
   - expect {{size}} matches "\d+ × \d+"
-  - record {{filename}}, {{size}} into "Captured sizes"
+  - record file={{filename}}, size={{size}} into "Captured sizes"
   - key-click cmd+i
 
-The checklist in section J is then typed out of `Captured sizes`, which is the
-whole reason the sizes were read into a table rather than glanced at.
+The checklist in section J is typed out of `Captured sizes` with
+`type table "Captured sizes"` — which is the whole reason the sizes were read
+into a table rather than glanced at.

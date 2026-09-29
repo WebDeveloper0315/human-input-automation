@@ -1,4 +1,4 @@
-# Profile format (schema 2)
+# Profile format (schema 3)
 
 A profile is a saved automation: a name, a durable way to find the target
 application again, and the plan to run against it.
@@ -38,7 +38,7 @@ interrupted save leaves the previous version intact — never a truncated file.
 
 ```json
 {
-  "schema": 2,
+  "schema": 3,
   "id": "e0e2a5d67c754004a1451b016187a86b",
   "name": "Open Search",
   "description": "Focus search and type",
@@ -101,9 +101,9 @@ interrupted save leaves the previous version intact — never a truncated file.
 `"schema"` is **required** and must be an integer. The version is never inferred
 from which fields are present.
 
-* This build writes **schema 2** and reads 1 and 2.
+* This build writes **schema 3** and reads 1, 2 and 3.
 * A newer version is rejected explicitly:
-  `Unsupported profile schema version: 3`. Nothing is downgraded or ignored.
+  `Unsupported profile schema version: 4`. Nothing is downgraded or ignored.
 * Older versions are handled by a migration registry
   (`serialization.MIGRATIONS`, `from_version -> upgrade function`), one entry
   per step, walked in order. A migration that fails to advance the version is
@@ -125,6 +125,15 @@ now walks onto those brackets instead of deleting them:
 `reclaim` is migrated because it was the only way to end up with the text as
 written, not a preference for typing over the editor's indentation. It remains
 a value anyone can choose.
+
+### 2 -> 3: the plan says how the pointer travels
+
+Version 2 had no `pointer` section, because the pointer only ever went in a
+straight line at a constant speed. The migration adds one with the default
+hand-like movement: the straight line was the only behaviour on offer, not a
+choice, and the pointer still lands on exactly the same pixel, so what a
+profile does is unchanged. Unticking *Move the pointer the way a hand does*
+and saving writes the straight line down explicitly.
 
 ## Actions
 
@@ -243,8 +252,8 @@ exactly as long as it was asked to. Setting `bow`, `tremor_px` and
 `overshoot_rate` to zero gives a straight line at a constant speed, which is
 what the application did before this section existed.
 
-A profile written before it simply has no `"pointer"` key and loads with the
-default.
+A version-2 profile gains this section by migration (see above); it is never
+inferred from the key being missing.
 
 ## Target identity
 

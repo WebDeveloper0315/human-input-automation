@@ -174,9 +174,15 @@ def _travel_to(
     """
     start = ctx.mouse.position()
     duration = ctx.timing.mouse_move_duration_ms(override_ms, distance_from=start, to=end)
+    screen = ctx.screen
     ctx.mouse.follow_path(
         plan_pointer_path(
-            start, end, duration_ms=duration, style=ctx.timing.pointer, rng=ctx.timing.rng
+            start,
+            end,
+            duration_ms=duration,
+            style=ctx.timing.pointer,
+            rng=ctx.timing.rng,
+            bounds=screen.virtual_bounds() if screen is not None and screen.is_known else None,
         ),
         ctx.control,
     )

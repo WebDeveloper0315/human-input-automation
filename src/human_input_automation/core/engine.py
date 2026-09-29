@@ -91,6 +91,7 @@ class ExecutionContext:
         emit: Callable[[RunEvent], None],
         dry_run: bool,
         state: InputState | None = None,
+        screen: ScreenGeometry | None = None,
     ) -> None:
         self.keyboard = keyboard
         self.mouse = mouse
@@ -100,6 +101,9 @@ class ExecutionContext:
         self.emit = emit
         self.dry_run = dry_run
         self.state = state or InputState()
+        #: The desktop, when it could be measured - what keeps the pointer's
+        #: journey off the edges that make macOS do things.
+        self.screen = screen
         self.index = 0
 
     # -- cooperative cancellation -----------------------------------------
@@ -250,6 +254,7 @@ class AutomationEngine:
             clock=clock,
             emit=emit,
             dry_run=plan.options.dry_run,
+            screen=screen,
         )
 
         started_at = clock.monotonic()

@@ -15,6 +15,7 @@ from human_input_automation.core.errors import ValidationError
 from human_input_automation.core.events import RunStatus
 from human_input_automation.core.plan import AutomationPlan, RunOptions
 from human_input_automation.core.pointer_path import (
+    EDGE_MARGIN_PX,
     REFERENCE_DISTANCE_PX,
     PathPoint,
     PointerStyle,
@@ -247,3 +248,84 @@ def test_a_plan_can_ask_for_machine_straight_movement() -> None:
 
     points = tuple(PathPoint(x, y, 0.0) for x, y in mouse.paths[0])
     assert deviation_px(points, (0, 0)) < 1.5
+
+
+# ---------------------------------------------------------------------------
+# The edges of the desktop
+# ---------------------------------------------------------------------------
+
+DESKTOP = (0, 0, 1920, 1080)
+
+
+@pytest.mark.parametrize(
+    ("name", "start", "end"),
+    [
+        ("a menu-bar item", (700, 500), (700, 8)),
+        ("a Dock icon", (700, 400), (700, 1075)),
+        ("a corner", (900, 500), (1919, 0)),
+        ("the left edge", (900, 500), (1, 540)),
+    ],
+)
+def test_the_journey_never_touches_the_edge_of_the_desktop(
+    name: str, start: tuple[int, int], end: tuple[int, int]
+) -> None:
+    """macOS acts on the edge: Hot Corners, the Dock, a hidden menu bar.
+
+    Found on review, not in use: reaching for the menu bar planned points at
+    y=-12, and for the Dock at y=1102 on a 1080-pixel screen. The pointer is
+    clamped by the system either way, but pressing into the edge is exactly
+    what reveals a Dock or fires a corner.
+    """
+    left, top, right, bottom = DESKTOP
+    for seed in range(200):
+        path = plan_pointer_path(
+            start, end, duration_ms=300, style=PointerStyle(overshoot_rate=1.0),
+            rng=random.Random(seed), bounds=DESKTOP,
+        )
+        assert (path[-1].x, path[-1].y) == end, f"{name}, seed {seed}"
+        for point in path[:-1]:
+            assert left + EDGE_MARGIN_PX <= point.x <= right - 1 - EDGE_MARGIN_PX, name
+            assert top + EDGE_MARGIN_PX <= point.y <= bottom - 1 - EDGE_MARGIN_PX, name
+
+
+def test_an_overshoot_that_would_leave_the_desktop_is_not_made() -> None:
+    for seed in range(50):
+        path = plan_pointer_path(
+            (700, 500), (700, 8), duration_ms=300, style=PointerStyle(overshoot_rate=1.0),
+            rng=random.Random(seed), bounds=DESKTOP,
+        )
+        assert min(point.y for point in path) >= 8, f"seed {seed}"
+
+
+def test_without_a_measured_desktop_nothing_is_clamped() -> None:
+    """Unknown geometry is not a reason to invent one."""
+    path = plan_pointer_path(
+        (700, 500), (700, 8), duration_ms=300, style=PointerStyle(overshoot_rate=1.0),
+        rng=random.Random(1),
+    )
+    assert min(point.y for point in path) < 8
+
+
+def test_a_run_keeps_the_pointer_off_the_edges_of_the_screen_it_was_given() -> None:
+    from human_input_automation.core.screen import CoordinateSpace, MonitorInfo, ScreenGeometry
+
+    screen = ScreenGeometry(
+        (MonitorInfo("main", 0, 0, 1920, 1080, is_primary=True),), CoordinateSpace.LOGICAL
+    )
+    mouse = FakeMouse()
+    mouse.move_to(700, 500, 0)
+    engine = AutomationEngine(
+        keyboard=FakeKeyboard(), mouse=mouse, windows=FakeWindows(), clock=FakeClock()
+    )
+    engine.run(
+        AutomationPlan(
+            make_target(),
+            [MouseMove(x=700, y=8, duration_ms=300)],
+            pointer=PointerStyle(overshoot_rate=1.0),
+            options=RunOptions(seed=2),
+        ),
+        screen=screen,
+    )
+    path = mouse.paths[0]
+    assert path[-1] == (700, 8)
+    assert min(y for _, y in path) >= 8

@@ -20,12 +20,13 @@ from ...core.plan import AutomationPlan
 from ...core.target import DisplayServer, PlatformName, TargetWindow
 
 #: The schema version this build writes.
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 #: Versions this build can read. Anything else is rejected explicitly rather
 #: than being guessed at or silently downgraded. Version 1 is reached through
 #: the migration registry in :mod:`.serialization`, never by leniency here.
-SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2})
+#: So is version 2.
+SUPPORTED_SCHEMA_VERSIONS = frozenset({1, 2, 3})
 
 _PROFILE_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 

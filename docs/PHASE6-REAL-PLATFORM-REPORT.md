@@ -89,6 +89,20 @@ close brackets or complete words. That claim rests on the editor model in
 `tests/test_editor_typing.py` and has to be confirmed by typing into the real
 editor.
 
+### Pointer movement (hand-like paths)
+Executed against the isolated X server, 2026-09-29, measuring the positions the
+target window itself recorded while a real pynput adapter moved the pointer
+from (200, 200) to (1500, 800) with a 600 ms duration:
+
+| Style | Positions recorded | Landed | Took | Max bow off the line | Distance per third of the time |
+| --- | --- | --- | --- | --- | --- |
+| Hand (default) | 142 | exactly (1500, 800) | 605 ms | 62.3 px | 25% / 54% / 21% |
+| Straight | 150 | exactly (1500, 800) | 604 ms | 0.1 px | 34% / 34% / 32% |
+
+The keep-off-the-edges margin was added afterwards and is covered by the unit
+suite; it has not been measured on a real screen edge, and on macOS - where the
+edges matter - nothing has been measured at all.
+
 ### Mouse
 * Absolute movement landed exactly: asked (600, 400), ended (600, 400).
 * Duration honoured: asked 400 ms, measured 401 ms — movement is interpolated,

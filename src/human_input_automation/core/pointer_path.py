@@ -19,6 +19,12 @@ Two properties hold whatever the style says, and both are tested:
   corrected before the text is done;
 * **time only moves forwards**, and the last point lands at the requested
   duration, so a movement still takes as long as it was asked to.
+
+This is motor behaviour - the movement of an arm, which is what this project
+reproduces for a humanoid robot and for recordings a person has to follow. It
+changes the shape of the motion and nothing the operating system reports about
+where the input came from, and it must not be described as making input
+indistinguishable from a person's.
 """
 
 from __future__ import annotations
@@ -33,6 +39,14 @@ from .errors import ValidationError, ValidationIssue
 #: movement of about this length is the "normal hop" the timing profile's
 #: duration describes.
 REFERENCE_DISTANCE_PX = 200.0
+
+#: How far from the edge of the desktop the pointer stays while travelling.
+#: macOS acts on the edge itself - a corner fires Hot Corners, which can lock the
+#: screen; the bottom edge reveals an auto-hidden Dock; the top edge reveals the
+#: menu bar over a full-screen window - so a path that brushes it can change
+#: what is on screen. Only the journey is kept off it; a target on the edge is
+#: still reached exactly.
+EDGE_MARGIN_PX = 3
 
 #: One position update. Eight milliseconds is ~120 Hz: finer than a 60 Hz
 #: screen can show, and the upper bound on how long a stop can be delayed by a
@@ -147,6 +161,11 @@ def movement_duration_ms(distance_px: float, base_ms: float, style: PointerStyle
     return base_ms * difficulty / math.log2(3)
 
 
+#: ``(left, top, right, bottom)``, right and bottom exclusive, as
+#: :meth:`~.screen.ScreenGeometry.virtual_bounds` returns them.
+Bounds = tuple[int, int, int, int]
+
+
 def plan_pointer_path(
     start: tuple[int, int],
     end: tuple[int, int],
@@ -154,8 +173,15 @@ def plan_pointer_path(
     duration_ms: float,
     style: PointerStyle | None = None,
     rng: random.Random | None = None,
+    bounds: Bounds | None = None,
 ) -> tuple[PathPoint, ...]:
-    """The timed path the pointer should follow from ``start`` to ``end``."""
+    """The timed path the pointer should follow from ``start`` to ``end``.
+
+    With ``bounds``, the journey stays :data:`EDGE_MARGIN_PX` inside the
+    desktop, and an overshoot that would leave it is not made - a hand stops at
+    the edge of the mat. Without them nothing is clamped, which is right only
+    where the desktop cannot be measured.
+    """
     style = style or PointerStyle()
     generator = rng or random.Random()
     distance = math.dist(start, end)
@@ -163,8 +189,10 @@ def plan_pointer_path(
     if distance == 0 or duration_ms <= 0:
         return (PathPoint(end[0], end[1], max(0.0, duration_ms)),)
     if style.is_direct:
-        return _straight(start, end, duration_ms, style)
-    return _natural(start, end, duration_ms, style, generator, distance)
+        path = _straight(start, end, duration_ms, style)
+    else:
+        path = _natural(start, end, duration_ms, style, generator, distance, bounds)
+    return _kept_on_screen(path, bounds) if bounds is not None else path
 
 
 # ---------------------------------------------------------------------------
@@ -193,6 +221,7 @@ def _natural(
     style: PointerStyle,
     rng: random.Random,
     distance: float,
+    bounds: Bounds | None = None,
 ) -> tuple[PathPoint, ...]:
     """A bowed, eased, occasionally overshooting reach."""
     overshoots = rng.random() < style.overshoot_rate
@@ -205,6 +234,10 @@ def _natural(
             round(end[0] + (end[0] - start[0]) / distance * extra),
             round(end[1] + (end[1] - start[1]) / distance * extra),
         )
+        if bounds is not None and not _inside(aim, bounds):
+            # Going past a target on the edge means going into the edge, which
+            # is exactly what the margin exists to prevent.
+            overshoots, aim = False, end
 
     reach_ms = duration_ms * (1 - style.correction_share) if overshoots else duration_ms
     points = list(
@@ -281,6 +314,32 @@ def _reach(
     return points
 
 
+def _inside(point: tuple[int, int], bounds: Bounds) -> bool:
+    left, top, right, bottom = bounds
+    return (
+        left + EDGE_MARGIN_PX <= point[0] < right - EDGE_MARGIN_PX
+        and top + EDGE_MARGIN_PX <= point[1] < bottom - EDGE_MARGIN_PX
+    )
+
+
+def _kept_on_screen(path: tuple[PathPoint, ...], bounds: Bounds) -> tuple[PathPoint, ...]:
+    """Pull every point but the last inside the margin.
+
+    The last is the target and is left exactly where it was asked to be, even
+    on the edge: arriving there was the point of the movement.
+    """
+    left, top, right, bottom = bounds
+    low_x, high_x = left + EDGE_MARGIN_PX, right - 1 - EDGE_MARGIN_PX
+    low_y, high_y = top + EDGE_MARGIN_PX, bottom - 1 - EDGE_MARGIN_PX
+    if low_x > high_x or low_y > high_y:  # a desktop smaller than its margins
+        return path
+    kept = [
+        PathPoint(min(max(point.x, low_x), high_x), min(max(point.y, low_y), high_y), point.at_ms)
+        for point in path[:-1]
+    ]
+    return (*kept, path[-1])
+
+
 def _eased(fraction: float) -> float:
     """Minimum-jerk easing: still, fast, still.
 
@@ -326,6 +385,7 @@ def deviation_px(path: tuple[PathPoint, ...], start: tuple[int, int]) -> float:
 
 __all__ = [
     "DEFAULT_STEP_MS",
+    "EDGE_MARGIN_PX",
     "REFERENCE_DISTANCE_PX",
     "PathPoint",
     "PointerStyle",

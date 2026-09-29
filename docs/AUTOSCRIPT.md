@@ -7,7 +7,7 @@ The program's job is to **read and perform** AutoScript. It does not write it:
 a guide is turned into a script separately, by a person or an assistant, and
 the result is what the program is handed. That is why this document is precise
 about what is legal rather than forgiving about what might be meant — and why
-§10 is written to be handed to an assistant doing the conversion.
+§11 is written to be handed to an assistant doing the conversion.
 
 ---
 
@@ -124,7 +124,7 @@ that is what a hand does — and it is why `left-click` takes no argument.
 | `middle-click` | `middle-click` | |
 | `press-button` / `release-button` | `press-button left` | The two halves of a drag |
 | `scroll` | `scroll down 3` · `scroll up 1` | Wheel notches |
-| `type` | `type "terminal"` · `type block "cases_csv"` | One character at a time, with this run's typing style |
+| `type` | `type "terminal"` · `type block "cases_csv"` · `type table "Captured sizes"` | One character at a time, with this run's typing style. A table is typed as CSV |
 | `key-click` | `key-click enter` · `key-click cmd+space` · `key-click ctrl+a` | One key or one chord |
 | `key-down` / `key-up` | `key-down shift` | Holding a modifier across other steps |
 | `wait` | `wait 300 ms` · `wait for "Save"` · `wait for window "Terminal"` | |
@@ -146,27 +146,169 @@ is hidden by it.
 
 | Verb | Example |
 |---|---|
-| `expect` | `expect output contains "COPY 30"` · `expect {{pages}} == 6` · `expect "Save" exists` |
+| `expect` | `expect output contains "COPY 30"` · `expect {{pages}} == 6` · `expect "Save" exists` — the full list is §5.9 |
 
 ### Structure
 
 | Construct | Example |
 |---|---|
 | Task | `# Overdue case report` (one, at the top) |
+| Platform | `Platform: macOS` — optional; a script for one platform is refused on another |
 | Stage | `## Sub-task 4 — Create the table` |
-| Application | `App: Terminal` — sticky until the next one |
-| Loop | `for each row in "Zones":` with indented steps |
-| Repeat | `repeat 4 times:` with indented steps |
-| Routine | `## Routine: save as` with `{{parameters}}`, called by `do` |
+| Application | `App: Terminal` — sticky until the next one; also allowed as a step, `- App: Finder` |
+| Loop | `- for each row in "Zones":` with nested steps |
+| Repeat | `- repeat 4 times:` with nested steps |
+| Routine | `## Routine: save into Captures (filename, folder)`, called by `do` |
 | Table | `Table: Zones` followed by a Markdown table |
 | Block | `Block: cases_csv` followed by a fenced block |
 
-Arguments are `"quoted"` for names and values, `` `backticked` `` for literal
-text to send, `{{name}}` for substitution, bare numbers for counts and
-coordinates. The keywords (`to`, `as`, `in`, `from`, `with`, `contains`,
-`times`, `exists`) are fixed.
+## 5. Exact rules
 
-## 5. One piece of sugar, and its expansion
+Written for the parser, and for whoever — person or assistant — writes the
+scripts it reads. Anything not allowed here is an error with a line number,
+never a guess.
+
+### 5.1 Lines
+
+* `# ` is the task title: exactly one, first heading in the document.
+* `## ` starts a stage. `## Routine: <name> (<param>, <param>)` starts a
+  routine instead; the parentheses are required, empty for none.
+* `App:`, `Platform:`, `Table:` and `Block:` at the start of a line are
+  directives. `App:` may also be written as a step, `- App: Finder`, which is
+  how a routine or a loop body changes application.
+* A list item (`-`, `*` or `1.`) is a step.
+* **Everything else is prose and is ignored** — including other `Word: value`
+  lines such as `Runs on:` or `Estimated:`. This is what lets a guide's notes
+  and warnings survive conversion untouched.
+
+### 5.2 Nesting
+
+`for each` and `repeat` end with a colon, and their body is the list items
+nested under them — indented at least two spaces further. Bodies may nest. A
+nested list anywhere else is an error, not an accident to be tolerated.
+
+### 5.3 Arguments and escaping
+
+| Form | For | Escaping |
+|---|---|---|
+| `"text"` | Names, labels, values | `\"` for a quote, `\\` for a backslash |
+| `` `text` `` | Literal keystrokes and commands | Use ``` `` two backticks `` ``` to fence text that contains one |
+| `{{name}}` | Substitution | `\{{` for a literal `{{` |
+| `12`, `1204,640` | Counts, durations, positions | — |
+
+Substitution happens in quoted strings, in backticked literals and in blocks.
+Only `{{name}}`, where `name` is letters, digits and underscores, is
+substituted — so shell braces (`{raw,exports}`) and awk's `{n++}` pass through
+untouched. An unknown `{{name}}` is an error before anything runs.
+
+### 5.4 Keys
+
+`key-click`, `key-down` and `key-up` take one key or a chord joined with `+`:
+
+* Named keys: `enter`, `tab`, `esc`, `space`, `backspace`, `delete`, `up`,
+  `down`, `left`, `right`, `home`, `end`, `page_up`, `page_down`, `f1`–`f12`.
+* Modifiers: `cmd`, `ctrl`, `alt` (also `option`), `shift`.
+* Any single printable character: `a`, `/`, `+`.
+
+`cmd` is Command on macOS, the Windows key on Windows and Super on Linux —
+**not** Ctrl. A shortcut is therefore a fact about one platform, which is what
+`Platform:` is for: `cmd+c` copies on macOS and opens something else entirely
+on Windows.
+
+### 5.5 Positions
+
+`x,y` in the coordinate space the pointer itself uses: logical points on
+macOS, which on a Retina display are half the pixels a screenshot shows. The
+position picker captures in exactly this space, so a number taken from it is a
+number a script can use.
+
+### 5.6 Screenshots go stale
+
+`find`, `read` (except `read output`), `expect "…" exists` and the label form
+of `move to` all look at **the most recent screenshot**. Any step that sends
+input — a click, a key, typing, a movement, a scroll — may change the screen,
+so after one, that screenshot is stale.
+
+**Using a stale screenshot is a validation error**, reported before anything
+runs. Take a `screenshot`, or `wait for` something, which takes its own.
+
+This is the rule most easily broken when converting a guide, and the one whose
+failure is silent: a position read off the old screen is a real position,
+pointing at the wrong thing.
+
+### 5.7 `find`
+
+```
+find [role] "label" [in window "Title"] as name
+```
+
+Roles: `button`, `menu`, `item`, `field`, `checkbox`, `tab`, `icon`, `text`,
+`window`. The result is the centre of what was found.
+
+* No match: the step fails.
+* **More than one match: the step fails**, listing where each one was. Add a
+  role, or a window, until only one is left. Picking one is exactly the guess
+  this language exists to avoid.
+
+### 5.8 Terminal output
+
+`output` is the text a terminal printed since Enter was last pressed in it,
+whether by `run` or by `key-click enter`. It is read from the terminal's own
+text, not off a screenshot, so it is exact and does not go stale.
+`read output as name` keeps it for later.
+
+### 5.9 Every form of `expect`
+
+| Form | Holds when |
+|---|---|
+| `expect output contains "t"` | The output includes `t` |
+| `expect output does not contain "t"` | It does not |
+| `expect "label" exists` | `find "label"` would find exactly one |
+| `expect "label" does not exist` | It would find none |
+| `expect {{v}} contains "t"` | The variable's text includes `t` |
+| `expect {{v}} matches "pattern"` | The pattern matches anywhere in it (Python `re` syntax) |
+| `expect {{v}} == "t"` · `!=` | Exact text equality |
+| `expect {{v}} == 6` · `!=` `>` `>=` `<` `<=` | Numeric comparison; a value that is not a number fails |
+
+Nothing else. There is no `and` and no `or`: two things to check are two
+`expect` steps, and a failure then says which one.
+
+### 5.10 `record`
+
+```
+record name={{value}}, other="text" into "Table"
+```
+
+Columns are named. The table is created by its first `record` and every later
+one must use the same columns. A recorded table can be typed out with
+`type table "Table"`, as CSV.
+
+### 5.11 `wait`
+
+* `wait 300 ms` · `wait 2 s`
+* `wait for [role] "label" [in window "Title"] [up to 30 s]` — takes the same
+  arguments as `find` (§5.7), and takes screenshots until exactly one match is
+  there, for up to 10 s unless `up to` says otherwise. It leaves its last
+  screenshot as the current one, so a `find` straight after it is not stale.
+  Not appearing in time is a failure.
+* `wait for window "Title"` — the same, for a window.
+
+### 5.12 Terminals
+
+`run` is legal when the current application is a terminal: `Terminal`,
+`iTerm2`, `Windows Terminal`, `PowerShell`, `Command Prompt`,
+`GNOME Terminal`, `Konsole` or `xterm` — or any application declared one with
+`App: Warp (terminal)`.
+
+### 5.13 Routines
+
+* Called as `do "save into Captures" with filename="x.png", folder="Captures"`.
+  Every parameter given exactly once, none extra.
+* A routine may call another, never itself, directly or through others.
+* A routine may change application. The application in force after `do` is
+  the one the routine left, so a script that cares says `App:` again.
+
+## 6. One piece of sugar, and its expansion
 
 Guide 1 is sixty shell commands. Writing each as `type` + `key-click enter`
 doubles its length for no gain, so:
@@ -182,11 +324,11 @@ doubles its length for no gain, so:
 - key-click enter
 ```
 
-It is legal only when the current `App:` is declared a terminal. It is sugar,
+It is legal only in a terminal (§5.12). It is sugar,
 not a shortcut past the typing: the characters still go one at a time, with
 this run's mistakes and pauses, because that is what the robot's hands do.
 
-## 6. Variables
+## 7. Variables
 
 Three sources and no others: a table column inside `for each`, a routine
 parameter, and `find` / `read ... as`. A position variable holds a point; a
@@ -195,7 +337,7 @@ text variable holds a string.
 There is no arithmetic and no expression language. Where a guide needs a
 computed number it already writes the number, and so does the script.
 
-## 7. Finding things on screen
+## 8. Finding things on screen
 
 `find "Move to Trash"` is the hard part. Four ways to turn a name into a point,
 cheapest and most reliable first:
@@ -225,7 +367,7 @@ Names resolve through a per-application **screen map** kept beside the script:
 OCR for, a reference image, or a point captured with the position picker. The
 per-application mess lives there, so the script stays about the work.
 
-## 8. When a step fails
+## 9. When a step fails
 
 Nothing is best-effort. A step that cannot find its target, or an `expect` that
 does not hold, stops the run at that step and reports which line of which
@@ -235,7 +377,7 @@ throughout, unchanged.
 Version 1 stops. Recovery — guide 1's three named failures — needs a `when`
 conditional, and waits until the straight-line case is solid.
 
-## 9. What it cannot do, on purpose
+## 10. What it cannot do, on purpose
 
 * No arithmetic, no expressions, no branching in v1, no user-defined verbs.
 * No code execution. `run` types a command into a terminal window; it never
@@ -246,7 +388,7 @@ conditional, and waits until the straight-line case is solid.
   in it. Every run has a dry run that prints every keystroke first, and that is
   the intended way to use this, not advice.
 
-## 10. Converting a guide into AutoScript
+## 11. Converting a guide into AutoScript
 
 For whoever — person or assistant — turns a guide into a script.
 
@@ -256,9 +398,9 @@ For whoever — person or assistant — turns a guide into a script.
 3. **Write what the body does, not what the user means.** "Right-click the file
    and choose Move to Trash" is six steps: screenshot, find, move, right-click,
    find, move, left-click. Never one.
-4. **Take a fresh `screenshot` after anything that changes the screen** — a
-   click that opens a menu, a window that appears — and before the `find` that
-   depends on it.
+4. **Take a fresh `screenshot` after any input and before the next `find` or
+   `read`** (§5.6). Not "after anything that changes the screen" - after
+   anything that *could*. The validator enforces it; do not make it.
 5. **Turn every stated expectation into an `expect`.** "Expected: COPY 30"
    becomes `expect output contains "COPY 30"`. These are the stopping points;
    a script without them fails silently.
@@ -270,6 +412,9 @@ For whoever — person or assistant — turns a guide into a script.
    block is ignored by the parser, so the notes and warnings that make a guide
    readable should survive into the script.
 9. **Use `run` only in a terminal.** Everywhere else, `type` and `key-click`.
-10. **Invent nothing.** If a step cannot be written with the verbs in §4, leave
+10. **Disambiguate `find`** (§5.7) with a role or a window whenever a label
+    could appear twice. "File" is a menu, a column header and a word in a
+    document all at once.
+11. **Invent nothing.** If a step cannot be written with the verbs in §4, leave
     the guide's sentence in as prose and say so — a missing verb is a
     conversation about the language, not a reason to guess.

@@ -311,7 +311,51 @@ def test_migrating_leaves_every_other_action_alone() -> None:
     assert profile.plan.actions == (Wait(duration_ms=25.0),)
 
 
-def test_a_version_2_profile_needs_no_migration() -> None:
+def test_a_schema_2_profile_is_given_a_pointer_section() -> None:
+    """Version 2 predates the choice; the migration writes the choice down."""
+    from human_input_automation.core.pointer_path import PointerStyle
+
+    old = {
+        "schema": 2,
+        "name": "Before pointer styles",
+        "target": {},
+        "plan": {"actions": [{"type": "wait", "duration_ms": 5, "delay_after_ms": None}]},
+    }
+    migrated = migrate(old)
+    assert migrated["schema"] == 3
+    assert "pointer" in migrated["plan"]
+
+    profile = profile_from_dict(old)
+    assert profile.plan is not None
+    assert profile.plan.pointer == PointerStyle()
+
+
+def test_a_schema_2_profile_keeps_a_pointer_section_it_somehow_has() -> None:
+    old = {
+        "schema": 2,
+        "name": "x",
+        "target": {},
+        "plan": {"actions": [], "pointer": {"bow": 0.0, "bow_jitter": 0.0,
+                                             "tremor_px": 0.0, "overshoot_rate": 0.0}},
+    }
+    profile = profile_from_dict(old)
+    assert profile.plan is not None and profile.plan.pointer.is_direct
+
+
+def test_a_schema_1_profile_walks_all_the_way_to_the_current_version() -> None:
+    old = {
+        "schema": 1,
+        "name": "Oldest",
+        "target": {},
+        "plan": {"actions": [{"type": "type_code", "text": "x", "drop_auto_pairs": True}]},
+    }
+    migrated = migrate(old)
+    assert migrated["schema"] == SCHEMA_VERSION
+    assert "pointer" in migrated["plan"]
+    assert migrated["plan"]["actions"][0]["pairs"] == "reuse"
+
+
+def test_a_current_profile_needs_no_migration() -> None:
     profile = profile_from_dict(profile_to_dict(Profile(name="Fresh")))
     assert profile.name == "Fresh"
 

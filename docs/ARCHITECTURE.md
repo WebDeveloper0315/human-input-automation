@@ -40,6 +40,7 @@ same name and confuses packaging and analysis tools.
 | `core/timing.py` | `TimingProfile`, `TimingService` |
 | `core/typing_style.py` | `TypingStyle` and the keystroke plan behind mistyping |
 | `core/editor_typing.py` | Predicting what a code editor does, and planning around it |
+| `core/pointer_path.py` | `PointerStyle` and the timed path the pointer follows; adapters only replay it |
 | `ui/position_picker.py` | Capturing a screen position by dragging to it |
 | `core/validation.py` | Plan/action/target validation, errors vs warnings |
 | `core/control.py` | `RunControl`: start/pause/resume/stop/emergency stop |
@@ -47,7 +48,7 @@ same name and confuses packaging and analysis tools.
 | `core/handlers.py` | One handler function per built-in action |
 | `core/events.py` | Run events and `RunReport` |
 | `core/dryrun.py` | Recording no-op ports used by dry-run mode |
-| `ports/*` | `KeyboardPort`, `MousePort`, `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort` |
+| `ports/*` | `KeyboardPort`, `MousePort` (incl. `follow_path`), `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort` |
 | `core/capabilities.py` | `CapabilityMatrix`: per-capability state, reason, permission |
 | `core/screen.py` | `MonitorInfo`, `ScreenGeometry`, coordinate space |
 | `adapters/platform_info.py` | Platform/display-server/permission detection, capability matrices |
