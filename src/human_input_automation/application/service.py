@@ -13,15 +13,21 @@ from dataclasses import dataclass
 
 from ..adapters.hotkeys import HotkeySupport
 from ..adapters.registry import AdapterSet, build_adapters
+from ..core.autoscript.model import Script
+from ..core.autoscript.runner import OwnProcess, ScriptOutcome, ScriptRunner
 from ..core.control import RunState
 from ..core.engine import AutomationEngine
 from ..core.errors import ValidationResult
 from ..core.events import EventListener, RunReport
 from ..core.plan import AutomationPlan
+from ..core.pointer_path import PointerStyle
 from ..core.screen import ScreenGeometry
 from ..core.target import DisplayServer, PlatformName, PlatformReport, TargetWindow
+from ..core.timing import TimingProfile
+from ..core.typing_style import TypingStyle
 from ..core.validation import validate_plan
 from ..ports.hotkeys import HotkeyPort
+from .autoscript import ScriptCheck, ScriptSession, check_script_for_host, script_ports
 from .profiles import LoadedProfile, Profile, ProfileService
 from .runner import AutomationRunner
 
@@ -44,6 +50,16 @@ class TargetListing:
         return not self.targets
 
 
+@dataclass(frozen=True)
+class ScriptSettings:
+    """How a script is typed and moved: the same settings a plan uses."""
+
+    timing: TimingProfile | None = None
+    typing: TypingStyle | None = None
+    pointer: PointerStyle | None = None
+    seed: int | None = None
+
+
 class AutomationService:
     """Facade over adapters, engine and runner."""
 
@@ -63,6 +79,8 @@ class AutomationService:
             windows=self._adapters.windows,
         )
         self._runner = AutomationRunner(self._engine, tick_seconds=countdown_tick_seconds)
+        self._script_session: ScriptSession | None = None
+        self._own: tuple[OwnProcess, ...] | None = None
 
     # -- host / targets ----------------------------------------------------
     @property
@@ -194,6 +212,8 @@ class AutomationService:
         countdown_seconds: float = 0.0,
     ) -> None:
         """Run ``plan`` on a worker thread after an optional countdown."""
+        if self._script_running:
+            raise RuntimeError("a script is running")
         self._runner.start(
             plan,
             listener,
@@ -202,17 +222,87 @@ class AutomationService:
             countdown_seconds=countdown_seconds,
         )
 
+    # -- scripts -------------------------------------------------------------
+    @property
+    def own_processes(self) -> tuple[OwnProcess, ...]:
+        """This program and the processes above it: never a script's target."""
+        if self._own is None:
+            from ..adapters.process_tree import own_processes
+
+            self._own = own_processes()
+        return self._own
+
+    def check_script(self, path: str) -> ScriptCheck:
+        """Read and check an AutoScript file for this host. Sends nothing."""
+        return check_script_for_host(path, self.own_processes)
+
+    def dry_run_script(
+        self, script: Script, settings: ScriptSettings, listener: EventListener | None = None
+    ) -> ScriptOutcome:
+        """Walk a script through recording ports and a virtual clock. Sends nothing."""
+        return self._script_runner(settings).run(script, listener=listener, dry_run=True)
+
+    def start_script(
+        self,
+        script: Script,
+        settings: ScriptSettings,
+        listener: EventListener | None = None,
+        *,
+        countdown_seconds: float = 0.0,
+    ) -> None:
+        """Perform ``script`` on a worker thread after an optional countdown.
+
+        The caller must have checked it (:meth:`check_script`) and shown the
+        user what it will do; this only refuses a second concurrent run.
+        """
+        if self.is_running:
+            raise RuntimeError("an automation run is already in progress")
+        session = ScriptSession(
+            self._script_runner(settings),
+            script,
+            listener=listener,
+            countdown_s=countdown_seconds,
+        )
+        self._script_session = session
+        session.start()
+
+    def _script_runner(self, settings: ScriptSettings) -> ScriptRunner:
+        return ScriptRunner(
+            script_ports(self._adapters, self.own_processes),
+            timing=settings.timing,
+            typing=settings.typing,
+            pointer=settings.pointer,
+            seed=settings.seed,
+        )
+
+    @property
+    def _script_running(self) -> bool:
+        return self._script_session is not None and self._script_session.is_running
+
+    @property
+    def last_script_outcome(self) -> ScriptOutcome | None:
+        return self._script_session.outcome if self._script_session is not None else None
+
+    # -- run control (whichever run is active) ---------------------------------
     def pause(self) -> None:
         self._runner.pause()
+        if self._script_session is not None:
+            self._script_session.control.pause()
 
     def resume(self) -> None:
         self._runner.resume()
+        if self._script_session is not None:
+            self._script_session.control.resume()
 
     def stop(self) -> None:
         self._runner.stop()
+        if self._script_session is not None:
+            self._script_session.control.stop()
 
     def emergency_stop(self) -> None:
         self._runner.emergency_stop()
+        if self._script_session is not None:
+            self._script_session.emergency_stop()
 
     # -- global hotkey -----------------------------------------------------
     @property
@@ -248,7 +338,7 @@ class AutomationService:
 
     @property
     def is_running(self) -> bool:
-        return self._runner.is_running
+        return self._runner.is_running or self._script_running
 
     @property
     def state(self) -> RunState:
@@ -259,4 +349,6 @@ class AutomationService:
         return self._runner.last_report
 
     def join(self, timeout: float | None = None) -> RunReport | None:
+        if self._script_session is not None:
+            self._script_session.join(timeout)
         return self._runner.join(timeout)

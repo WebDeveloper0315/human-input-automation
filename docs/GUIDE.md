@@ -259,7 +259,22 @@ contain no commands or scripts — they cannot execute anything.
 ### Running an AutoScript
 
 A guide converted into AutoScript (`docs/AUTOSCRIPT.md`, `docs/CONVERT-PROMPT.md`)
-is checked, walked through, then run:
+is checked, walked through, then run. In the window, the **AutoScript** panel
+does all three:
+
+1. **Open script...** — choose the `.md` file. It is checked at once; errors,
+   and lines this version cannot run yet, are listed under it. Nothing runs.
+2. **Dry run script** — every step, loops and routines unrolled, appears in the
+   *Dry run / preview* panel with an estimated duration. Nothing is sent.
+3. **Run script** — the file is read and checked again (so edits since opening
+   count), you are asked to confirm and shown which applications it will use,
+   then the countdown from the Run row starts. The window minimises if
+   *Minimise while running* is ticked; the emergency stop stays on screen.
+   Each step is logged by its line number in the run log.
+
+The script types and moves with the **Timing** panel's settings — delays,
+mistakes and pointer style — exactly as a plan does. **Reload** reads the file
+again after you edit it. The same from a terminal:
 
 ```bash
 human-input-automation --check-script task.md          # errors, with lines
@@ -282,8 +297,12 @@ screen reading (roadmap 8.3).
 * **Stop** with Ctrl+C in the starting window, or the emergency hotkey. The run
   also stops by itself, before the next key, if focus moves to another
   application.
-* `--mistakes 0` types exactly; the default mistypes about 2% of letters and
-  corrects them. `--yes` skips the confirmation, `--countdown N` sets the wait.
+* From the command line, `--mistakes 0` types exactly (the default mistypes
+  about 2% of letters and corrects them), `--yes` skips the confirmation and
+  `--countdown N` sets the wait.
+* **Starting the window from Terminal.app** makes Terminal the program's own
+  host, so a script that drives Terminal is refused. Start the window from
+  iTerm2 or VS Code's terminal instead.
 
 ---
 

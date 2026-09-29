@@ -248,7 +248,8 @@ first guide translated into it.
 - [ ] Verified on macOS with Terminal and iTerm2
 - [ ] Guide 1 runs unattended against a scratch database, and stops on the
       first expectation that does not hold
-- [ ] An "Open script…" button in the window, reusing the same runner
+- [x] An AutoScript panel in the window (Open script..., Reload, Dry run
+      script, Run script), reusing the same runner and the Timing panel
 
 The highest-value target and the one with no pixel-hunting in it.
 

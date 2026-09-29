@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import Any
 
 from ..adapters.hotkeys import HotkeySupport
+from ..application.autoscript import ScriptCheck
 from ..application.profiles import LoadedProfile, ProfileState
 from ..core.actions import (
     DEFAULT_LINE_START_CHORD,
@@ -36,6 +37,8 @@ from ..core.actions import (
     TypeText,
     Wait,
 )
+from ..core.autoscript.model import UseApp, walk
+from ..core.autoscript.runner import ScriptOutcome, StepStarted
 from ..core.capabilities import CapabilityName, CapabilityState
 from ..core.errors import ValidationError
 from ..core.events import (
@@ -1268,6 +1271,8 @@ def _event_text(event: RunEvent) -> str | None:
         return f"Action {event.index + 1}: {event.description}"
     if isinstance(event, ActionCompleted):
         return None
+    if isinstance(event, StepStarted):
+        return f"Line {event.line}: {event.description}"
     if isinstance(event, RunPaused):
         return f"Paused before action {event.index + 1}"
     if isinstance(event, RunResumed):
@@ -1372,3 +1377,120 @@ def dry_run_view(
         result=friendly_error(report),
         warnings=tuple(issue.message for issue in report.issues if issue.severity == "warning"),
     )
+
+
+# ---------------------------------------------------------------------------
+# AutoScript
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ScriptView:
+    """What the script panel shows for the script that is open, if any."""
+
+    title: str = "No script open"
+    summary: str = "Open an AutoScript file (.md) to check it, preview it and run it."
+    problems: tuple[str, ...] = ()
+    has_script: bool = False
+    can_dry_run: bool = False
+    can_run: bool = False
+
+
+def script_view(check: ScriptCheck | None) -> ScriptView:
+    """The panel's content for a checked script."""
+    if check is None:
+        return ScriptView()
+    script = check.script
+    name = check.path.replace("\\", "/").rsplit("/", 1)[-1]
+    title = f"{script.title} ({name})" if script.title else name
+    report = check.report
+    problems = _grouped_refusals(check)
+    if not report.ok:
+        summary = f"{len(report.errors)} error(s) - fix the script, then Reload."
+    elif check.refusals:
+        summary = (
+            f"{script.step_count} step(s). Cannot be run here yet "
+            f"({len(check.refusals)} line(s) below); Dry run still works."
+        )
+    else:
+        apps = ", ".join(script_applications(check)) or "none"
+        summary = (
+            f"{len(script.stages)} stage(s), {script.step_count} step(s). "
+            f"Applications: {apps}."
+        )
+    warnings = tuple(f"line {_digits(w.location)}: warning: {w.message}" for w in report.warnings)
+    return ScriptView(
+        title=title,
+        summary=summary,
+        problems=problems + warnings,
+        has_script=True,
+        can_dry_run=check.can_dry_run,
+        can_run=check.can_run,
+    )
+
+
+def _grouped_refusals(check: ScriptCheck, shown: int = 8) -> tuple[str, ...]:
+    """One row per reason, with its lines: 89 identical rows say less than one."""
+    lines: dict[str, list[int]] = {}
+    for refusal in check.refusals:
+        lines.setdefault(refusal.message, []).append(refusal.line)
+    rows = []
+    for message, numbers in lines.items():
+        listed = ", ".join(str(n) for n in numbers[:shown])
+        more = f" and {len(numbers) - shown} more" if len(numbers) > shown else ""
+        label = "line" if len(numbers) == 1 else "lines"
+        rows.append(f"{label} {listed}{more}: {message}")
+    return tuple(rows)
+
+
+def script_applications(check: ScriptCheck) -> tuple[str, ...]:
+    """Every application the script names, in order of first use."""
+    script = check.script
+    bodies = [stage.steps for stage in script.stages]
+    bodies += [routine.steps for routine in script.routines.values()]
+    names: dict[str, None] = {}
+    for steps in bodies:
+        for step in walk(steps):
+            if isinstance(step, UseApp):
+                names.setdefault(step.name, None)
+    return tuple(names)
+
+
+def script_run_confirmation(check: ScriptCheck) -> str:
+    """The question asked before a script takes over the keyboard and mouse."""
+    apps = ", ".join(script_applications(check)) or "no application"
+    return (
+        f"Run \"{check.script.title or check.path}\"?\n\n"
+        f"It will type and click in: {apps}.\n"
+        f"{check.script.step_count} step(s). Commands in the script are typed into "
+        "the terminal and run as written.\n\n"
+        "Keep your hands off the keyboard and mouse. The run stops by itself if "
+        "another application takes focus, and the emergency stop works throughout."
+    )
+
+
+def script_dry_run_view(
+    check: ScriptCheck, outcome: ScriptOutcome, steps: Sequence[StepStarted]
+) -> DryRunView:
+    """The preview panel's content after walking a script."""
+    minutes = outcome.elapsed_ms / 60000
+    lines = tuple(f"line {step.line}: {step.description}" for step in steps)
+    unsupported = tuple(r.message for r in check.refusals)
+    if outcome.ok:
+        result = f"Walked through {outcome.steps_done} step(s). No input was sent."
+    else:
+        where = f" at line {outcome.failed_line}" if outcome.failed_line else ""
+        result = f"The walk-through stopped{where}: {outcome.error}"
+    return DryRunView(
+        target_text=f"Script: {check.script.title or check.path}",
+        estimated_duration=(
+            f"Estimated duration: {minutes:.1f} min, not counting screen steps"
+        ),
+        lines=lines,
+        result=result,
+        warnings=tuple(dict.fromkeys(unsupported)),
+    )
+
+
+def _digits(location: str) -> str:
+    return "".join(ch for ch in location if ch.isdigit()) or "0"

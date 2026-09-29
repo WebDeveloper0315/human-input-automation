@@ -8,6 +8,7 @@ input and runs nothing - exactly as validating a profile is. Only
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -26,9 +27,19 @@ from ..core.autoscript.runner import (
 )
 from ..core.control import RunControl
 from ..core.errors import Severity, ValidationIssue
-from ..core.events import CountdownTick, RunEvent, RunStatus
+from ..core.events import (
+    CountdownCancelled,
+    CountdownStarted,
+    CountdownTick,
+    RunEvent,
+    RunFinished,
+    RunStarted,
+    RunStatus,
+)
 from ..core.target import PlatformName, PlatformReport
 from ..ports.terminal import TerminalPort
+
+logger = logging.getLogger(__name__)
 
 #: A script is a document someone reads; anything this size is not one.
 MAX_SCRIPT_BYTES = 2_000_000
@@ -78,7 +89,9 @@ def terminal_reader(host: PlatformReport) -> TerminalPort | None:
     return None
 
 
-def script_ports(adapters: AdapterSet) -> RunnerPorts:
+def script_ports(
+    adapters: AdapterSet, own: tuple[OwnProcess, ...] | None = None
+) -> RunnerPorts:
     """Everything a script run reaches the desktop through, for this host."""
     from ..adapters.process_tree import own_processes
 
@@ -90,7 +103,7 @@ def script_ports(adapters: AdapterSet) -> RunnerPorts:
         windows=adapters.windows,
         terminal=terminal_reader(adapters.host),
         screen=adapters.geometry(),
-        own_processes=own_processes(),
+        own_processes=own if own is not None else own_processes(),
     )
 
 
@@ -131,6 +144,35 @@ def refusals(
     return found
 
 
+@dataclass(frozen=True)
+class ScriptCheck:
+    """A script file as read, checked, and judged against this host."""
+
+    path: str
+    report: ScriptReport
+    #: Why it cannot be performed here; empty when it can.
+    refusals: tuple[Refusal, ...]
+
+    @property
+    def script(self) -> Script:
+        return self.report.script
+
+    @property
+    def can_run(self) -> bool:
+        return self.report.ok and not self.refusals
+
+    @property
+    def can_dry_run(self) -> bool:
+        """A walk-through sends nothing, so only errors in the script stop it."""
+        return self.report.ok
+
+
+def check_script_for_host(path: str | Path, own: Sequence[OwnProcess]) -> ScriptCheck:
+    """Read and check a script, and everything that would refuse it here. Sends nothing."""
+    report = check_script_file(path)
+    return ScriptCheck(str(path), report, tuple(refusals(report, own)))
+
+
 class ScriptSession:
     """One script run on a worker thread, after an interruptible countdown.
 
@@ -160,24 +202,48 @@ class ScriptSession:
         self._thread.start()
 
     def _run(self) -> None:
+        """Emits the same lifecycle events as a plan run, so a UI shows both alike."""
         remaining = self._countdown_s
+        if remaining > 0:
+            self._emit(CountdownStarted(remaining))
         while remaining > 0:
-            if self._listener is not None:
-                self._listener(CountdownTick(remaining))
             step = min(1.0, remaining)
             if self.control.wait_for_stop(step):
                 break
-            remaining -= step
+            remaining = max(0.0, remaining - step)
+            self._emit(CountdownTick(remaining))
         if self.control.is_stop_requested():
             emergency = self.control.is_emergency
             status = RunStatus.EMERGENCY_STOPPED if emergency else RunStatus.STOPPED
-            self._outcome = ScriptOutcome(
+            outcome = ScriptOutcome(
                 status, 0, 0.0, error="cancelled during the countdown; no input was sent"
             )
+            self._emit(CountdownCancelled(emergency=emergency))
+        else:
+            script = self._script
+            self._emit(RunStarted(script.title or "script", script.step_count, self._dry_run))
+            outcome = self._runner.run(script, self.control, self._listener, dry_run=self._dry_run)
+        self._outcome = outcome
+        error = outcome.error
+        if error is not None and outcome.failed_line is not None:
+            error = f"line {outcome.failed_line}: {error}"
+        self._emit(RunFinished(outcome.status, outcome.steps_done, outcome.elapsed_ms, error))
+
+    def _emit(self, event: RunEvent) -> None:
+        if self._listener is None:
             return
-        self._outcome = self._runner.run(
-            self._script, self.control, self._listener, dry_run=self._dry_run
-        )
+        try:
+            self._listener(event)
+        except Exception:  # a broken listener must not affect the run
+            logger.exception("script listener raised for %r", event)
+
+    @property
+    def is_running(self) -> bool:
+        return self._thread.is_alive()
+
+    @property
+    def outcome(self) -> ScriptOutcome | None:
+        return None if self._thread.is_alive() else self._outcome
 
     def emergency_stop(self) -> None:
         self.control.emergency_stop()

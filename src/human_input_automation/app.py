@@ -194,7 +194,7 @@ def run_script(
     """
     from .application.autoscript import ScriptSession, check_script_file, refusals, script_ports
     from .core.autoscript.runner import ScriptRunner, StepStarted
-    from .core.events import CountdownTick, RunEvent
+    from .core.events import CountdownStarted, CountdownTick, RunEvent
     from .core.typing_style import TypingStyle
 
     report = check_script_file(file)
@@ -231,8 +231,10 @@ def run_script(
         def show(event: RunEvent) -> None:
             if isinstance(event, StepStarted):
                 print(f"  {event.line:>4}  {event.description}", flush=True)
-            elif isinstance(event, CountdownTick):
-                print(f"Starting in {event.remaining:.0f} s - Ctrl+C to cancel", flush=True)
+            elif isinstance(event, CountdownStarted):
+                print(f"Starting in {event.seconds:.0f} s - Ctrl+C to cancel", flush=True)
+            elif isinstance(event, CountdownTick) and event.remaining > 0:
+                print(f"Starting in {event.remaining:.0f} s", flush=True)
 
         typing = TypingStyle.natural(typo_rate=max(0.0, mistakes_percent) / 100)
         runner = ScriptRunner(ports, typing=typing)

@@ -270,6 +270,7 @@ X server, with `--yes --countdown 1`.
 | `read output` holds only the output — not the command line, not the returning prompt | **PASS** (`{{lines}} == 3`, `{{upper}} == ALPHA`) |
 | Focus moved to the decoy during a `wait`, before the next `run` | **PASS** — FAILED at that line, the command was not typed, **0** key events reached the decoy |
 | Focus moved to the decoy part way through a long `type` | **PASS** — stopped mid-line, **0** key events reached the decoy |
+| The same script from the window (Run script, real adapters, window minimised during the run) | **PASS** — 22 steps in 20.2 s, `seen.csv` correct, 0 key events to the decoy |
 | Cost of the focus check | 0.46 ms per `active_window()` on X11, so it runs before every keystroke |
 | `tools/platform_verify` harness after the X11 typing change | 56 passed, 0 failed, 1 not tested (macOS-only) |
 

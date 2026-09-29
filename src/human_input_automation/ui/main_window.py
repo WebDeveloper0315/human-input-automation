@@ -25,13 +25,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ..application.autoscript import ScriptCheck
 from ..application.profiles import (
     LoadedProfile,
     Profile,
     ProfileError,
     ProfileState,
 )
-from ..application.service import AutomationService
+from ..application.service import AutomationService, ScriptSettings
+from ..core.autoscript.runner import StepStarted
 from ..core.events import (
     CountdownStarted,
     CountdownTick,
@@ -62,6 +64,9 @@ from .models import (
     next_state,
     preview_delays,
     profile_title,
+    script_dry_run_view,
+    script_run_confirmation,
+    script_view,
     target_status_view,
     timing_to_values,
 )
@@ -70,6 +75,7 @@ from .profile_panel import ProfilePanel
 from .run_bridge import RunEventBridge
 from .run_controls import RunControls
 from .run_log import RunLog
+from .script_panel import ScriptPanel
 from .stop_overlay import StopOverlay
 from .target_panel import TargetPanel
 from .timing_panel import TimingPanel
@@ -104,6 +110,12 @@ class MainWindow(QMainWindow):
         self._applying = False
         #: Overridable in tests; the GUI shows a Save/Discard/Cancel dialog.
         self.unsaved_prompt: Callable[[], UnsavedChoice] | None = None
+        #: The open AutoScript, as last checked, and whether the run in flight
+        #: is that script rather than the plan.
+        self._script: ScriptCheck | None = None
+        self._script_running = False
+        #: Overridable in tests; the GUI asks before a script takes over input.
+        self.script_run_prompt: Callable[[str], bool] | None = None
 
         self.setWindowTitle("Human Input Automation")
         # Ask for enough height to show every panel at once; _fit_to_screen()
@@ -119,6 +131,7 @@ class MainWindow(QMainWindow):
 
         self.banner = CapabilityBanner()
         self.profile_panel = ProfilePanel()
+        self.script_panel = ScriptPanel()
         self.target_panel = TargetPanel()
         self.action_editor = ActionEditor()
         self.timing_panel = TimingPanel()
@@ -203,6 +216,7 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
         layout.addWidget(self.banner)
         layout.addWidget(self.profile_panel)
+        layout.addWidget(self.script_panel)
         layout.addWidget(self.body_scroll, 1)
         # The run controls sit outside the splitter and keep their own height,
         # so Start and the emergency stop can never be squeezed off screen.
@@ -250,6 +264,10 @@ class MainWindow(QMainWindow):
         self.controls.stop_requested.connect(self.stop_run)
         self.controls.emergency_requested.connect(self.emergency_stop)
         self.controls.dry_run_requested.connect(self.dry_run)
+        self.script_panel.open_requested.connect(self.open_script)
+        self.script_panel.reload_requested.connect(self.reload_script)
+        self.script_panel.dry_run_requested.connect(self.dry_run_script)
+        self.script_panel.run_requested.connect(self.run_script)
 
     # -- first run and permissions -----------------------------------------
     def build_first_run_summary(self) -> FirstRunSummary:
@@ -693,6 +711,7 @@ class MainWindow(QMainWindow):
         if plan is None:
             return
         self._set_state(UiState.STARTING)
+        self._script_running = False
         try:
             self._service.start(
                 plan, self.bridge, countdown_seconds=self.controls.countdown_seconds
@@ -734,6 +753,129 @@ class MainWindow(QMainWindow):
         delays = preview_delays(plan.timing, seed=plan.options.seed)
         self.dry_run_panel.show_view(dry_run_view(report, plan.target, delays))
         self._log("Dry run finished - no input was sent")
+
+    # -- AutoScript --------------------------------------------------------
+    @Slot()
+    def open_script(self, path: str | None = None) -> None:
+        """Choose a script file and check it. Nothing is run."""
+        if self._state.is_active:
+            return
+        chosen = path or self._ask_for_script_path()
+        if chosen:
+            self._check_script(chosen)
+
+    @Slot()
+    def reload_script(self) -> None:
+        if self._script is not None and not self._state.is_active:
+            self._check_script(self._script.path)
+
+    def _check_script(self, path: str) -> ScriptCheck:
+        check = self._service.check_script(path)
+        self._script = check
+        view = script_view(check)
+        self.script_panel.show_view(view)
+        self._log(f"Script {view.title}: {view.summary}")
+        for problem in view.problems:
+            self._log(f"  {problem}")
+        return check
+
+    @property
+    def script(self) -> ScriptCheck | None:
+        return self._script
+
+    def _script_settings(self) -> ScriptSettings | None:
+        """The timing panel's settings - a script types and moves like a plan."""
+        timing = self.timing_panel.profile()
+        if timing is None:
+            self._show_message(
+                "Invalid timing",
+                self.timing_panel.error_text or "The timing values are not valid.",
+            )
+            return None
+        return ScriptSettings(
+            timing=timing,
+            typing=self.timing_panel.typing_style(),
+            pointer=self.timing_panel.pointer_style(),
+            seed=self.timing_panel.seed,
+        )
+
+    @Slot()
+    def dry_run_script(self) -> None:
+        """Walk the script through recording ports. Sends nothing."""
+        if self._script is None or self._state.is_active:
+            return
+        check = self._check_script(self._script.path)
+        if not check.can_dry_run:
+            self._show_message("Script has errors", "Fix the errors listed, then try again.")
+            return
+        settings = self._script_settings()
+        if settings is None:
+            return
+        steps: list[StepStarted] = []
+
+        def collect(event: RunEvent) -> None:
+            if isinstance(event, StepStarted):
+                steps.append(event)
+
+        outcome = self._service.dry_run_script(check.script, settings, collect)
+        self.dry_run_panel.show_view(script_dry_run_view(check, outcome, steps))
+        self._log("Script dry run finished - no input was sent")
+
+    @Slot()
+    def run_script(self) -> None:
+        """Check the file again, ask, then run it on the service's worker thread."""
+        if self._script is None or self._state.is_active:
+            return
+        check = self._check_script(self._script.path)  # it may have been edited
+        if not check.can_run:
+            self._show_message(
+                "Script cannot run",
+                "\n".join(f"- {problem}" for problem in script_view(check).problems)
+                or "The script has errors.",
+            )
+            return
+        settings = self._script_settings()
+        if settings is None or not self._confirm_script_run(check):
+            return
+        self._set_state(UiState.STARTING)
+        self._script_running = True
+        try:
+            self._service.start_script(
+                check.script,
+                settings,
+                self.bridge,
+                countdown_seconds=self.controls.countdown_seconds,
+            )
+        except RuntimeError as error:
+            self._script_running = False
+            self._set_state(UiState.IDLE)
+            self._show_message("Already running", str(error))
+            return
+        if self.controls.minimise_while_running:
+            self._minimise_for_run()
+
+    def _confirm_script_run(self, check: ScriptCheck) -> bool:
+        question = script_run_confirmation(check)
+        if self.script_run_prompt is not None:
+            return self.script_run_prompt(question)
+        if not self._show_dialogs:
+            return False  # never run unasked
+        answer = QMessageBox.question(
+            self,
+            "Run script",
+            question,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _ask_for_script_path(self) -> str | None:
+        if not self._show_dialogs:
+            return None
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open AutoScript", "", "AutoScript (*.md);;All files (*)"
+        )
+        return path or None
 
     # -- getting out of the way --------------------------------------------
     def _minimise_for_run(self) -> None:
@@ -793,9 +935,12 @@ class MainWindow(QMainWindow):
             self.controls.show_countdown("")
             if self.stop_overlay.isVisible() or self.isMinimized():
                 self.restore_from_run()
-            report = self._service.last_report
-            if report is not None:
-                self._log(friendly_error(report))
+            if self._script_running:
+                self._script_running = False
+            else:
+                report = self._service.last_report
+                if report is not None:
+                    self._log(friendly_error(report))
             self._check_target_available()
 
     @Slot()
@@ -840,6 +985,7 @@ class MainWindow(QMainWindow):
         self.action_editor.set_locked(not state.editing_enabled)
         self.timing_panel.set_locked(not state.editing_enabled)
         self.profile_panel.set_locked(not state.editing_enabled)
+        self.script_panel.set_locked(not state.editing_enabled)
 
     @property
     def state(self) -> UiState:
