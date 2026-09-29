@@ -288,9 +288,25 @@ known in advance, such as `My Playlist #7` or a header reading
 ### 5.8 Terminal output
 
 `output` is the text a terminal printed since Enter was last pressed in it,
-whether by `run` or by `key-click enter`. It is read from the terminal's own
+whether by `run` or by `key-click enter` - not the command line itself, and
+not the shell's prompt when it comes back. It is read from the terminal's own
 text, not off a screenshot, so it is exact and does not go stale.
 `read output as name` keeps it for later.
+
+Commands take time, so a step that looks at output waits for it:
+
+* `expect output contains` and `matches` look again every quarter second, and
+  hold as soon as the text is there - for up to 10 s.
+* `expect output does not contain` and `read output` wait until the output has
+  stopped changing for a second (up to 10 s), since "not yet" is not "not".
+* `run` first waits for the command before it to finish - its prompt back, or
+  its output still for a second - for up to 5 minutes, as a person waits
+  before typing the next command. Keys typed into a command that is still
+  printing interleave with its output.
+
+Where the text comes from is per platform: Terminal and iTerm2 on macOS answer
+AppleScript (macOS asks once for permission: Privacy & Security ->
+Automation); on Linux the shell must run inside `tmux`, whose pane is read.
 
 ### 5.9 Every form of `expect`
 
@@ -364,7 +380,20 @@ the first that gives exactly one window:
    contains `Coggle`.
 
 Two or more matches at the step that decides is an error, never a guess, in
-the same way as `find` (§5.7). No match fails the step.
+the same way as `find` (§5.7) - with one exception people rely on: when the
+application has several windows and **one of them is already in front**, that
+one is used. So with two Terminal windows open, bring the one you mean to the
+front before the run. No match fails the step.
+
+Windows belonging to the program running the script - the terminal or editor
+it was started from - are never matched (§13).
+
+### 5.15 An application before any input
+
+Every step that sends input needs an application to send it to, so the first
+such step must come after an `App:` line (in the preamble, a stage, or a
+routine called before it). The validator reports `script.input_before_app`
+otherwise.
 
 ## 6. One piece of sugar, and its expansion
 
@@ -496,3 +525,37 @@ For whoever — person or assistant — turns a guide into a script.
 14. **Invent nothing.** If a step cannot be written with the verbs in §4, leave
     the guide's sentence in as prose and say so — a missing verb is a
     conversation about the language, not a reason to guess.
+
+## 13. Running a script
+
+```
+human-input-automation --run-script task.md --dry-run   # walk through; sends nothing
+human-input-automation --run-script task.md             # asks, counts down, runs
+```
+
+Before anything is sent, the script is checked (§11), and the run is refused -
+naming each line - if any step needs something this version cannot do yet
+(`screenshot`, `find`, `wait for "label"`, reading a label, `move to "label"`
+all wait for roadmap 8.3; `scroll` is not implemented), or if an `App:` names
+the application the command was started from. Then it asks for `RUN` to be
+typed (`--yes` skips this), counts down (`--countdown 5`), and performs the
+steps, printing each line as it starts.
+
+* **Stopping.** Ctrl+C in the window that started the run, or the global
+  emergency-stop hotkey where the platform allows one. Held keys and buttons
+  are released either way.
+* **Focus.** Before every keystroke and pointer movement, the focused window is
+  checked. If it is the program running the script, or belongs to another
+  application than the current `App:`, the run stops at that line before the
+  input is sent. Spotlight, the menu bar and the Dock are the operating
+  system's own surfaces, not another application, and do not stop a run.
+* **Never into itself.** Keys sent to the terminal the run was started from
+  would sit in its input buffer and run as commands afterwards. On macOS every
+  Terminal window is one process, so a script that drives Terminal must be
+  started from another application - iTerm2, or VS Code's terminal.
+* **Typing mistakes.** `--mistakes 2` (the default) mistypes about 2% of
+  letters and corrects them with Backspace; `--mistakes 0` types exactly.
+* **Dry run.** Follows every step, loops and routines included, through
+  recording ports and a virtual clock: nothing reaches the desktop, screen
+  steps are listed rather than refused, and the time the run would take is
+  estimated.

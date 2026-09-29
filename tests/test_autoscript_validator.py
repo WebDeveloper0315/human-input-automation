@@ -8,22 +8,32 @@ from human_input_automation.core.autoscript import check_script
 from human_input_automation.core.errors import ValidationIssue
 
 
-def issues(body: str, *, platform: bool = True) -> tuple[ValidationIssue, ...]:
-    head = "# Task\n\n" + ("Platform: macOS\n\n" if platform else "")
+def issues(
+    body: str, *, platform: bool = True, app: bool = True
+) -> tuple[ValidationIssue, ...]:
+    """Check ``body`` as the stages of a script.
+
+    The header names an application in place of a blank line, so line numbers
+    are the same with or without it: line 5 is always the first line of
+    ``body``.
+    """
+    head = "# Task\n\n"
+    if platform:
+        head += "Platform: macOS\n" + ("App: Target\n" if app else "\n")
     return check_script(head + textwrap.dedent(body)).issues
 
 
-def errors(body: str) -> list[tuple[str, str]]:
+def errors(body: str, *, app: bool = True) -> list[tuple[str, str]]:
     """(code, location) for every error."""
-    return [(i.code, i.location) for i in issues(body) if i.severity.value == "error"]
+    return [(i.code, i.location) for i in issues(body, app=app) if i.severity.value == "error"]
 
 
-def codes(body: str) -> list[str]:
-    return [code for code, _ in errors(body)]
+def codes(body: str, *, app: bool = True) -> list[str]:
+    return [code for code, _ in errors(body, app=app)]
 
 
-def warnings(body: str) -> list[str]:
-    return [i.code for i in issues(body) if i.severity.value == "warning"]
+def warnings(body: str, *, app: bool = True) -> list[str]:
+    return [i.code for i in issues(body, app=app) if i.severity.value == "warning"]
 
 
 # ---------------------------------------------------------------------------
@@ -466,4 +476,42 @@ def test_a_script_without_a_platform_is_a_warning() -> None:
 
 
 def test_an_empty_stage_is_a_warning() -> None:
-    assert "script.empty_stage" in warnings("## Nothing here\n\n## S\n- screenshot\n")
+    assert "script.empty_stage" in warnings("## Nothing here\n\n## S\n- screenshot\n", app=False)
+
+
+# ---------------------------------------------------------------------------
+# Where input goes
+# ---------------------------------------------------------------------------
+
+
+def test_input_before_any_app_is_an_error() -> None:
+    """A script never types into whatever happens to have focus."""
+    assert codes("## S\n- key-click cmd+space\n", app=False) == ["script.input_before_app"]
+
+
+def test_looking_and_waiting_before_an_app_are_fine() -> None:
+    assert errors("## S\n- wait 2 s\n- screenshot\nApp: Finder\n- left-click\n", app=False) == []
+
+
+def test_a_routine_that_names_its_own_app_can_be_called_first() -> None:
+    body = """
+    ## S
+    - do "open"
+    - key-click enter
+
+    ## Routine: open ()
+    - App: Finder
+    - key-click cmd+space
+    """
+    assert errors(body, app=False) == []
+
+
+def test_calling_a_routine_that_types_before_any_app_is_named_is_an_error() -> None:
+    body = """
+    ## S
+    - do "type it"
+
+    ## Routine: type it ()
+    - type "x"
+    """
+    assert codes(body, app=False) == ["script.input_before_app"]

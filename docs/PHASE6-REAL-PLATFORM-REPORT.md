@@ -3,7 +3,7 @@
 What was **executed**, on what, and what remains unverified. Nothing here is
 inferred: every PASS corresponds to a check that ran and was observed.
 
-Last updated: 2026-09-02. Application version 0.7.0.
+Last updated: 2026-09-30. Application version 0.7.0.
 
 ## 1. Vocabulary
 
@@ -218,6 +218,7 @@ fake-based suite, and each now has regression tests.
 | pynput 1.8.2 | Loads its **X11** backend inside a Wayland session whenever `DISPLAY` is set | Input reaches XWayland clients only; reported as *restricted*, not available |
 | pynput 1.8.2 | `GlobalHotKeys` does not match Ctrl+Alt combinations or character keys (X11) | Default hotkey changed; bad shapes warned about |
 | pynput 1.8.2 | `Controller.press("enter")` raises `ValueError` — only single characters are accepted as strings | All named keys are translated in `adapters/keymap.py` |
+| pynput 1.8.2 | On X11, characters are sent with `XSendEvent` (synthetic); only named keys use XTEST. xterm refuses synthetic events by default | Characters go through XTEST in `adapters/x11_typing.py` (§9) |
 | pynput 1.8.2 | The macOS backend has no `Key.insert` | Rejected by validation before a run starts |
 | pywinctl 0.4.1 | `getAllWindows()` raises `KeyError: 'id'` on Ubuntu GNOME; `getActiveWindow()` returns a phantom 1×1 window | Not used on Linux; every call wrapped |
 | pymonctl 0.92 | Returns duplicated monitors, and monitors belonging to another display | Replaced by RandR on Linux; deduplicated elsewhere |
@@ -253,3 +254,51 @@ PATH="./xenv/bin:$PATH" tools/platform_verify/run_x11_session.sh /tmp/verify pyt
 The same harness runs in CI (`verify-x11` job), so this configuration is
 re-verified on every push. Windows, macOS and real desktop sessions remain the
 manual checklist in `docs/RELEASE-CHECKLIST.md`.
+
+## 9. AutoScript runner — terminal tasks (roadmap 8.2)
+
+Executed 2026-09-30 on the host in §2, on a private Xvfb display (`:98`,
+1600×900) with `mini_wm.py`, **xterm 407** running **tmux 3.6** on a private
+tmux socket (`TMUX_TMPDIR`), and the harness's decoy window beside it. Nothing
+ran on the tester's desktop. The runner was started from a shell outside the
+X server, with `--yes --countdown 1`.
+
+| Check | Result |
+| --- | --- |
+| `examples/autoscript/*.md --dry-run` (5 converted guides) | All walk to the end, 0 events sent; screen steps listed |
+| Terminal script: `run`, `expect output contains`/`matches`/`does not contain`, `read output`, numeric `expect`, `for each` over a table, `record`, `type table` into `cat > seen.csv`, `ctrl+d` | **PASS** — 22 steps in 26.6 s with `--mistakes 5`; `seen.csv` is exactly `word,upper` / `alpha,ALPHA` / `bravo,BRAVO` |
+| `read output` holds only the output — not the command line, not the returning prompt | **PASS** (`{{lines}} == 3`, `{{upper}} == ALPHA`) |
+| Focus moved to the decoy during a `wait`, before the next `run` | **PASS** — FAILED at that line, the command was not typed, **0** key events reached the decoy |
+| Focus moved to the decoy part way through a long `type` | **PASS** — stopped mid-line, **0** key events reached the decoy |
+| Cost of the focus check | 0.46 ms per `active_window()` on X11, so it runs before every keystroke |
+| `tools/platform_verify` harness after the X11 typing change | 56 passed, 0 failed, 1 not tested (macOS-only) |
+
+Bugs found by running it, each with a regression test:
+
+* **xterm received Enter but no characters.** pynput sends characters as
+  synthetic `XSendEvent`s and xterm's `allowSendEvents` is off. Characters and
+  the letter of a shortcut (`ctrl+d`) now go through XTEST when the layout has
+  a key for them, pynput otherwise (`test_pynput_input.py`). A capital is now a
+  real Shift press and the letter; the harness's timing check measures between
+  character presses accordingly.
+* **The next command was typed while the previous one was still printing**,
+  garbling the line (`e(base)…$ eco alpha`). A `run` now waits for the prompt
+  to return or the output to settle (`test_a_command_is_not_typed_until_…`).
+* **`read output` included the returning prompt.** The prompt is taken from
+  the command line before Enter and removed (`test_read_output_is_the_output_alone`).
+* **With a 200 ms focus-check interval, two characters reached the decoy**
+  after focus moved. The check now runs at every keystroke
+  (`test_focus_moving_part_way_through_typing_stops_the_rest`).
+
+Environment note: the tester's `XMODIFIERS=@im=ibus` and IM module variables
+were unset for the private display as a precaution; whether they matter was
+not tested (unsetting them alone did not make characters arrive).
+
+**Not verified:** macOS Terminal and iTerm2 (AppleScript text reading, the
+Automation permission prompt, Spotlight as a system surface, whether
+`active_window()` is fast enough there to check every keystroke), Windows (no
+terminal reader exists yet), GNOME Terminal and Konsole.
+
+Reproduce: build a private display as in §8, start `xterm -e tmux new -s x`
+with `TMUX_TMPDIR` pointing somewhere private, then
+`human-input-automation --run-script task.md --yes`.

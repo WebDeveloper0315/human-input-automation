@@ -747,8 +747,12 @@ def check_timing(service: AutomationService, target: TargetWindow, log: EventLog
     marker = log.count()
     text = "TIMING"
     result = run_plan(service, plan_for(target, TypeText(text=text), timing=profile, seed=7))
-    events = log.wait_for(marker, len(text), timeout=15)
-    presses = [event for event in events if event["kind"] == "key_press"]
+    events = log.wait_for(marker, 2 * len(text), timeout=15)
+    # Characters only: on X11 a capital arrives as a real Shift press followed by
+    # the letter, and the gap between those two is not a typing delay.
+    presses = [
+        event for event in events if event["kind"] == "key_press" and event.get("text")
+    ]
     gaps = [
         (presses[index + 1]["at"] - presses[index]["at"]) * 1000
         for index in range(len(presses) - 1)

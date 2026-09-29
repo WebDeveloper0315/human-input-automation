@@ -16,6 +16,7 @@ from typing import Any
 import pytest
 
 from human_input_automation.adapters.pynput_input import MOVE_STEP_MS, PynputKeyboard, PynputMouse
+from human_input_automation.adapters.x11_typing import XTestTyper, keysym_for
 from human_input_automation.core.errors import AdapterUnavailableError
 from human_input_automation.core.keys import Key, MouseButton
 
@@ -124,6 +125,90 @@ def test_a_key_missing_from_the_backend_raises_before_pressing_anything() -> Non
 def test_backend_name_is_reported_for_diagnostics() -> None:
     module = keyboard_module()
     assert PynputKeyboard(module).backend_name
+
+
+class FakeDisplay:
+    """A US layout: letters and digits plain, capitals and ``!`` with Shift."""
+
+    SHIFT = 50
+
+    def __init__(self) -> None:
+        self.synced = 0
+
+    def keysym_to_keycodes(self, keysym: int) -> list[tuple[int, int]]:
+        char = chr(keysym) if keysym < 0x100 else ""
+        if char.islower() or char.isdigit() or char == " ":
+            return [(100 + ord(char.upper()) % 50, 0)]
+        if char.isupper():
+            return [(100 + ord(char) % 50, 1)]
+        if char == "!":
+            return [(10, 1)]
+        if keysym == 0xFF0D:
+            return [(36, 0)]
+        return []
+
+    def keysym_to_keycode(self, keysym: int) -> int:
+        return self.SHIFT if keysym == 0xFFE1 else 0
+
+    def sync(self) -> None:
+        self.synced += 1
+
+
+class FakeXTest:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int]] = []
+
+    def fake_input(self, display: Any, kind: int, keycode: int) -> None:
+        self.events.append(("down" if kind == 2 else "up", keycode))
+
+
+def test_xtest_types_a_character_on_its_own_key() -> None:
+    xtest = FakeXTest()
+    assert XTestTyper(FakeDisplay(), xtest).type_char("a")
+    assert xtest.events == [("down", 115), ("up", 115)]
+
+
+def test_xtest_holds_shift_only_around_a_shifted_character() -> None:
+    xtest = FakeXTest()
+    typer = XTestTyper(FakeDisplay(), xtest)
+    assert typer.type_char("A") and typer.type_char("!")
+    shift = FakeDisplay.SHIFT
+    assert xtest.events == [
+        ("down", shift), ("down", 115), ("up", 115), ("up", shift),
+        ("down", shift), ("down", 10), ("up", 10), ("up", shift),
+    ]  # fmt: skip
+
+
+def test_xtest_leaves_what_the_layout_cannot_type_to_the_fallback() -> None:
+    xtest = FakeXTest()
+    assert not XTestTyper(FakeDisplay(), xtest).type_char("한")
+    assert xtest.events == []
+
+
+def test_a_newline_is_the_return_key() -> None:
+    assert keysym_for("\n") == 0xFF0D and keysym_for("é") == 0xE9
+    assert keysym_for("한") == 0x01000000 | ord("한")
+
+
+def test_on_x11_characters_go_through_xtest_and_the_rest_through_pynput() -> None:
+    module = keyboard_module()
+    xtest = FakeXTest()
+    PynputKeyboard(module, typer=XTestTyper(FakeDisplay(), xtest)).type_text("a한")
+    assert xtest.events == [("down", 115), ("up", 115)]
+    assert module._controller.calls == [("type", "한")]
+
+
+def test_on_x11_the_letter_of_a_shortcut_goes_through_xtest_too() -> None:
+    """``ctrl+d``: Control is a named key for pynput, ``d`` is pressed through XTEST."""
+    module = keyboard_module()
+    xtest = FakeXTest()
+    adapter = PynputKeyboard(module, typer=XTestTyper(FakeDisplay(), xtest))
+    adapter.key_down(Key.CTRL)
+    adapter.key_down("d")
+    adapter.key_up("d")
+    adapter.key_up(Key.CTRL)
+    assert xtest.events == [("down", 118), ("up", 118)]
+    assert module._controller.calls == [("press", "<Key.ctrl>"), ("release", "<Key.ctrl>")]
 
 
 # -- mouse ----------------------------------------------------------------

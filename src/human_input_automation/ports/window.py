@@ -47,3 +47,12 @@ class WindowControlPort(Protocol):
         permissions). ``None`` means "unknown", never "no".
         """
         ...
+
+    def active_window(self) -> TargetWindow | None:
+        """The window that has focus now, or ``None`` when that cannot be read.
+
+        A script moves between applications, so it cannot compare focus with
+        one chosen window the way a plan does; it asks which window - and so
+        which application - has focus, before every step that sends input.
+        """
+        ...

@@ -14,6 +14,11 @@ human-input-automation --check-script path/to/script.md
 
 Every error is printed with its line. Paste them back into the same
 conversation and ask for a corrected script; repeat until it reports `OK`.
+Then read through what it would do, still without sending anything:
+
+```
+human-input-automation --run-script path/to/script.md --dry-run
+```
 
 ---
 

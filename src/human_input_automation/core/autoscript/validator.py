@@ -132,6 +132,8 @@ class _RoutineSummary:
     app_after: str | None = None
     changes_app: bool = False
     records: set[str] = field(default_factory=set)
+    #: Sends input before it names an application of its own.
+    input_before_app: bool = False
 
 
 class _Validator:
@@ -339,12 +341,27 @@ class _Validator:
             app_after=app,
             changes_app=any(isinstance(step, UseApp) for step in walk(routine.steps)),
             records={step.table for step in walk(routine.steps) if isinstance(step, Record)},
+            input_before_app=self._input_before_app(routine.steps),
         )
         for step in walk(routine.steps):
             if isinstance(step, Call) and step.routine in self.summaries:
                 summary.records |= self.summaries[step.routine].records
         self.summaries[routine.name] = summary
         return summary
+
+    def _input_before_app(self, steps: tuple[Step, ...]) -> bool:
+        for step in walk(steps):
+            if isinstance(step, UseApp):
+                return False
+            if isinstance(step, _INPUT):
+                return True
+            if isinstance(step, Call):
+                called = self.summaries.get(step.routine)
+                if called is not None and called.input_before_app:
+                    return True
+                if called is not None and called.changes_app:
+                    return False
+        return False
 
     def summary(self, name: str) -> _RoutineSummary | None:
         routine = self.script.routines.get(name)
@@ -405,6 +422,22 @@ class _Walker:
         report: bool,
     ) -> tuple[int | str | None, str | None]:
         self._names(step, scope, report)
+
+        if self.routine is None and app is None:
+            sends_input = isinstance(step, _INPUT) and not isinstance(step, UseApp)
+            if isinstance(step, Call):
+                called = self.owner.summary(step.routine)
+                sends_input = called is not None and called.input_before_app
+            if sends_input:
+                self.report(
+                    _error(
+                        "script.input_before_app",
+                        step.line,
+                        "this sends input before any 'App:' line has said where it goes; "
+                        "a script never types into whatever happens to have focus",
+                    ),
+                    report,
+                )
 
         if stale is not None and self._looks_at_screen(step):
             self.report(_stale(step, stale), report)

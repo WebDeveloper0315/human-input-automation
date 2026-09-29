@@ -230,16 +230,25 @@ first guide translated into it.
       loops (second time round included) and routine calls
 - [x] `--check-script`: compiler-style output, UNSUPPORTED and CHECK notes
       listed, exit status for batch use; never runs a step
-- [ ] Rendering: a dry run that prints every keystroke a script expands to
+- [x] Rendering: `--run-script --dry-run` walks every step, loops and routines
+      included, through recording ports, and estimates the run's length
 
-### 8.2 — Terminal tasks, end to end
+### 8.2 — Terminal tasks, end to end (runner done; macOS not yet run)
 
-- [ ] `App:`, `run`, `type block`, `wait for`, `expect output contains`
-- [ ] Terminal output read back exactly - through the accessibility tree where
-      the terminal exposes its text, not by OCR
+- [x] `--run-script`: `App:`, `run`, `type`/`type block`/`type table`,
+      `key-click`, pointer steps with coordinates, `wait for window`,
+      `expect`, `read output`, `record`, `for each`, `repeat`, routines
+- [x] Terminal output read back exactly, not by OCR: AppleScript for
+      Terminal and iTerm2 on macOS, `tmux` on Linux
+- [x] A `run` waits for the command before it to finish
+- [x] Focus checked before every keystroke; never into the program running
+      the script; refused up front when a script drives its own host app
+- [x] Verified on Linux/X11 in an isolated X server with xterm and tmux
+      (PHASE6 report), including focus moved away mid-step
+- [ ] Verified on macOS with Terminal and iTerm2
 - [ ] Guide 1 runs unattended against a scratch database, and stops on the
       first expectation that does not hold
-- [ ] Verified on the real platform, in the harness
+- [ ] An "Open script…" button in the window, reusing the same runner
 
 The highest-value target and the one with no pixel-hunting in it.
 

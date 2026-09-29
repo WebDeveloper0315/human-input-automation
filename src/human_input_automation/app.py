@@ -176,6 +176,113 @@ def run_check_script(files: list[str]) -> int:
     return 1 if failed else 0
 
 
+def run_script(
+    file: str,
+    *,
+    dry_run: bool = False,
+    assume_yes: bool = False,
+    countdown_s: float = 5.0,
+    mistakes_percent: float = 2.0,
+    adapters: AdapterSet | None = None,
+) -> int:
+    """Check a script, then perform it - or, with ``dry_run``, walk it without input.
+
+    Nothing is sent unless the script checks clean, every step in it can be
+    performed by this version, none of its applications is the one running this
+    program, and the user confirms. Ctrl+C and the global hotkey both stop the
+    run at once; held keys are released either way.
+    """
+    from .application.autoscript import ScriptSession, check_script_file, refusals, script_ports
+    from .core.autoscript.runner import ScriptRunner, StepStarted
+    from .core.events import CountdownTick, RunEvent
+    from .core.typing_style import TypingStyle
+
+    report = check_script_file(file)
+    owned = adapters is None
+    # A dry run never touches the desktop, so it never builds the desktop adapters.
+    host_adapters = adapters or build_adapters(allow_desktop=not dry_run)
+    try:
+        ports = script_ports(host_adapters)
+        problems = refusals(report, ports.own_processes, performing=not dry_run)
+        if problems:
+            for problem in problems:
+                print(f"{file}:{problem.line}: {problem.message}", file=sys.stderr)
+            print(f"{file}: not run - nothing was sent.", file=sys.stderr)
+            return 1
+        if not dry_run and not host_adapters.is_functional:
+            print("This host cannot send input:", file=sys.stderr)
+            for reason in host_adapters.problems:
+                print(f"  {reason}", file=sys.stderr)
+            return 1
+
+        script = report.script
+        stages = len(script.stages)
+        print(f"{script.title or file}: {script.step_count} step(s) in {stages} stage(s)")
+        if not dry_run and not assume_yes:
+            if not sys.stdin.isatty():
+                print("Refusing to run without confirmation; pass --yes.", file=sys.stderr)
+                return 1
+            print("This will take over the keyboard and mouse.")
+            answer = input("Type RUN to start: ")
+            if answer.strip() != "RUN":
+                print("Not run - nothing was sent.")
+                return 1
+
+        def show(event: RunEvent) -> None:
+            if isinstance(event, StepStarted):
+                print(f"  {event.line:>4}  {event.description}", flush=True)
+            elif isinstance(event, CountdownTick):
+                print(f"Starting in {event.remaining:.0f} s - Ctrl+C to cancel", flush=True)
+
+        typing = TypingStyle.natural(typo_rate=max(0.0, mistakes_percent) / 100)
+        runner = ScriptRunner(ports, typing=typing)
+        session = ScriptSession(
+            runner,
+            script,
+            listener=show,
+            countdown_s=0.0 if dry_run else countdown_s,
+            dry_run=dry_run,
+        )
+        hotkey = False
+        if not dry_run:
+            hotkey = host_adapters.hotkey.start(session.emergency_stop)
+            if hotkey:
+                print(f"Emergency stop: {host_adapters.hotkey.description} (or Ctrl+C here)")
+            else:
+                reason = host_adapters.hotkey_support.reason
+                print(f"Emergency stop: Ctrl+C here. The global hotkey is unavailable: {reason}")
+        session.start()
+        try:
+            outcome = None
+            while outcome is None:
+                try:
+                    outcome = session.join(0.2)
+                except KeyboardInterrupt:
+                    session.emergency_stop()
+                    print("Stopping...", file=sys.stderr)
+        finally:
+            if hotkey:
+                host_adapters.hotkey.stop()
+
+        seconds = outcome.elapsed_ms / 1000
+        if outcome.ok:
+            if dry_run:
+                print(
+                    f"Walked through {outcome.steps_done} step(s); performed, they would take "
+                    f"about {seconds / 60:.1f} min without screen steps. Dry run - no input "
+                    "was sent."
+                )
+            else:
+                print(f"Completed: {outcome.steps_done} step(s) in {seconds:.1f} s.")
+            return 0
+        where = f" at line {outcome.failed_line}" if outcome.failed_line else ""
+        print(f"{outcome.status.value.upper()}{where}: {outcome.error}", file=sys.stderr)
+        return 1
+    finally:
+        if owned:
+            host_adapters.close()
+
+
 def run_smoke_test(paths: ApplicationPaths | None = None) -> int:
     """Verify a packaged build actually works. Sends no input.
 
@@ -315,6 +422,36 @@ def run(argv: list[str] | None = None) -> int:
         "sends no input)",
     )
     parser.add_argument(
+        "--run-script",
+        metavar="PATH",
+        help="check an AutoScript file, then perform it after confirmation "
+        "(sends keyboard and mouse input)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="with --run-script: walk through the steps and send no input",
+    )
+    parser.add_argument(
+        "--yes",
+        action="store_true",
+        help="with --run-script: do not ask for confirmation",
+    )
+    parser.add_argument(
+        "--countdown",
+        metavar="SECONDS",
+        type=float,
+        default=5.0,
+        help="with --run-script: seconds to wait before the first step (default 5)",
+    )
+    parser.add_argument(
+        "--mistakes",
+        metavar="PERCENT",
+        type=float,
+        default=2.0,
+        help="with --run-script: share of letters mistyped and corrected (default 2, 0 for none)",
+    )
+    parser.add_argument(
         "--smoke-test",
         action="store_true",
         help="verify this build starts, opens its window and stores a profile, "
@@ -346,6 +483,14 @@ def run(argv: list[str] | None = None) -> int:
         return run_validate_profile(args.validate_profile, paths)
     if args.check_script:
         return run_check_script(args.check_script)
+    if args.run_script:
+        return run_script(
+            args.run_script,
+            dry_run=args.dry_run,
+            assume_yes=args.yes,
+            countdown_s=args.countdown,
+            mistakes_percent=args.mistakes,
+        )
     if args.check:
         return run_check(paths)
     return run_gui(paths)

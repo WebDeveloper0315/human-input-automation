@@ -13,7 +13,9 @@ executed):
 
 * Windows and macOS use OS-level synthetic input APIs; macOS requires
   Accessibility permission before any of it does anything.
-* On Linux, pynput drives X11 through XTEST. **In a Wayland session with
+* On Linux, pynput drives X11 through XTEST for special keys but sends
+  characters as synthetic events, which xterm refuses; characters therefore go
+  through :mod:`.x11_typing` on X11. **In a Wayland session with
   XWayland running, pynput still loads its X11 backend** - verified on Ubuntu
   26.04 GNOME/Wayland - so input reaches X11 clients only, and native Wayland
   windows silently ignore it.
@@ -26,7 +28,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..core.errors import AdapterUnavailableError
-from ..core.keys import KeyLike, MouseButton
+from ..core.keys import Key, KeyLike, MouseButton
 from ..core.pointer_path import PathPoint, PointerStyle, plan_pointer_path
 from ..ports.clock import CancelToken
 from .keymap import resolve_button, resolve_key
@@ -52,13 +54,28 @@ def import_pynput() -> tuple[Any, Any]:
 
 
 class PynputKeyboard:
-    """Implements :class:`~..ports.input.KeyboardPort`."""
+    """Implements :class:`~..ports.input.KeyboardPort`.
 
-    def __init__(self, keyboard_module: Any | None = None) -> None:
+    On X11, characters go through :class:`~.x11_typing.XTestTyper` rather than
+    pynput's synthetic events, which some applications refuse (see there).
+    """
+
+    def __init__(self, keyboard_module: Any | None = None, typer: Any | None = None) -> None:
         if keyboard_module is None:
             keyboard_module, _ = import_pynput()
         self._keyboard = keyboard_module
         self._controller = keyboard_module.Controller()
+        self._typer = typer if typer is not None else self._xtest_typer()
+
+    def _xtest_typer(self) -> Any | None:
+        if not self.backend_name.endswith("_xorg"):
+            return None
+        try:
+            from .x11_typing import XTestTyper
+
+            return XTestTyper()
+        except Exception:  # no python-xlib, or no display: pynput alone
+            return None
 
     @property
     def backend_name(self) -> str:
@@ -66,13 +83,26 @@ class PynputKeyboard:
         return str(getattr(self._keyboard.Controller, "__module__", "unknown"))
 
     def type_text(self, text: str) -> None:
-        self._controller.type(text)
+        if self._typer is None:
+            self._controller.type(text)
+            return
+        for char in text:
+            if not self._typer.type_char(char):
+                self._controller.type(char)
 
     def key_down(self, key: KeyLike) -> None:
-        self._controller.press(resolve_key(self._keyboard, key))
+        if not self._xtest_key(key, down=True):
+            self._controller.press(resolve_key(self._keyboard, key))
 
     def key_up(self, key: KeyLike) -> None:
-        self._controller.release(resolve_key(self._keyboard, key))
+        if not self._xtest_key(key, down=False):
+            self._controller.release(resolve_key(self._keyboard, key))
+
+    def _xtest_key(self, key: KeyLike, *, down: bool) -> bool:
+        """A character key (the ``d`` of ``ctrl+d``) through XTEST, where there is one."""
+        if self._typer is None or isinstance(key, Key) or len(key) != 1:
+            return False
+        return bool(self._typer.press_char(key, down))
 
 
 class PynputMouse:

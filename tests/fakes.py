@@ -135,6 +135,10 @@ class FakeWindows:
     activate_result: bool = True
     active_result: bool | None = True
     calls: list[str] = field(default_factory=list)
+    #: What ``active_window`` reports; a script run follows it through
+    #: ``activate`` unless a test pins it.
+    active: TargetWindow | None = None
+    follow_activation: bool = True
 
     def list_windows(self) -> Sequence[TargetWindow]:
         return list(self.windows)
@@ -144,11 +148,16 @@ class FakeWindows:
 
     def activate(self, target: TargetWindow, cancel: object = None) -> bool:
         self.calls.append(f"activate:{target.handle}")
+        if self.activate_result and self.follow_activation:
+            self.active = target
         return self.activate_result
 
     def is_active(self, target: TargetWindow) -> bool | None:
         self.calls.append(f"is_active:{target.handle}")
         return self.active_result
+
+    def active_window(self) -> TargetWindow | None:
+        return self.active
 
 
 def make_target(

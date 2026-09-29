@@ -87,6 +87,9 @@ class NullWindowBackend:
     def is_active(self, target: TargetWindow) -> bool | None:
         return None
 
+    def active_window(self) -> TargetWindow | None:
+        return None
+
 
 class NullCapabilityProbe:
     """Capability probe reporting that nothing is supported."""

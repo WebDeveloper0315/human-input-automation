@@ -256,6 +256,35 @@ asks; it never picks for you and never falls back to the focused window.
 Profiles are plain JSON in your user directory (`docs/PROFILE-FORMAT.md`), and
 contain no commands or scripts — they cannot execute anything.
 
+### Running an AutoScript
+
+A guide converted into AutoScript (`docs/AUTOSCRIPT.md`, `docs/CONVERT-PROMPT.md`)
+is checked, walked through, then run:
+
+```bash
+human-input-automation --check-script task.md          # errors, with lines
+human-input-automation --run-script task.md --dry-run  # every step; sends nothing
+human-input-automation --run-script task.md            # type RUN, 5 s countdown, go
+```
+
+This version runs terminal work and anything done with keys and fixed
+coordinates. A script with `screenshot`, `find` or a label to move to is
+refused before anything is sent, with each line named — that arrives with
+screen reading (roadmap 8.3).
+
+* **Start it from a different application than the one it drives.** On macOS,
+  a script that works in Terminal must be started from iTerm2 or VS Code's
+  terminal; the run refuses otherwise, because keys sent to its own window
+  would run as commands afterwards.
+* **Terminal output** is read from Terminal or iTerm2 through AppleScript: the
+  first run makes macOS ask whether this program may control the terminal
+  (Privacy & Security → Automation). On Linux, run the shell in `tmux`.
+* **Stop** with Ctrl+C in the starting window, or the emergency hotkey. The run
+  also stops by itself, before the next key, if focus moves to another
+  application.
+* `--mistakes 0` types exactly; the default mistypes about 2% of letters and
+  corrects them. `--yes` skips the confirmation, `--countdown N` sets the wait.
+
 ---
 
 ## 3. Platform notes
