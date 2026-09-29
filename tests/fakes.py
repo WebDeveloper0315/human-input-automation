@@ -139,6 +139,8 @@ class FakeWindows:
     #: ``activate`` unless a test pins it.
     active: TargetWindow | None = None
     follow_activation: bool = True
+    #: How often the full (slow on macOS) focused-window lookup was made.
+    window_lookups: int = 0
 
     def list_windows(self) -> Sequence[TargetWindow]:
         return list(self.windows)
@@ -157,7 +159,11 @@ class FakeWindows:
         return self.active_result
 
     def active_window(self) -> TargetWindow | None:
+        self.window_lookups += 1
         return self.active
+
+    def active_process_id(self) -> int | None:
+        return self.active.process_id if self.active is not None else None
 
 
 def make_target(

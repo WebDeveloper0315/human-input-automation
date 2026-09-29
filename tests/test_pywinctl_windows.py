@@ -387,3 +387,52 @@ def test_macos_activation_gets_a_longer_budget_than_other_platforms() -> None:
     mac = PyWinCtlWindows(host(PlatformName.MACOS, DisplayServer.QUARTZ), module())
     other = PyWinCtlWindows(host(), module())
     assert mac._activation_timeout > other._activation_timeout
+
+
+# -- the per-keystroke focus question ----------------------------------------
+def quartz(*windows: dict[str, int]) -> SimpleNamespace:
+    return SimpleNamespace(
+        kCGWindowListOptionOnScreenOnly=1,
+        kCGWindowListExcludeDesktopElements=16,
+        kCGNullWindowID=0,
+        CGWindowListCopyWindowInfo=lambda options, relative: list(windows),
+    )
+
+
+def test_macos_asks_quartz_for_the_front_window_owner_in_one_call() -> None:
+    """Never a walk over Accessibility properties: that cost 1.5 s a keystroke."""
+
+    def no_accessibility() -> Any:
+        raise AssertionError("the Accessibility path must not be used")
+
+    backend = PyWinCtlWindows(
+        host(PlatformName.MACOS, DisplayServer.QUARTZ),
+        module=SimpleNamespace(getActiveWindow=no_accessibility),
+        quartz=quartz(
+            {"kCGWindowLayer": 25, "kCGWindowOwnerPID": 90},  # the menu bar, Spotlight
+            {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 412},  # Terminal, in front
+            {"kCGWindowLayer": 0, "kCGWindowOwnerPID": 77},
+        ),
+    )
+    assert backend.active_process_id() == 412
+
+
+def test_a_failing_quartz_query_is_unknown_not_an_error() -> None:
+    broken = SimpleNamespace(
+        kCGWindowListOptionOnScreenOnly=1,
+        kCGWindowListExcludeDesktopElements=16,
+        kCGNullWindowID=0,
+        CGWindowListCopyWindowInfo=lambda *args: 1 / 0,
+    )
+    macos = host(PlatformName.MACOS, DisplayServer.QUARTZ)
+    backend = PyWinCtlWindows(macos, module(), quartz=broken)
+    assert backend.active_process_id() is None
+
+
+def test_the_front_process_is_unknown_when_focus_cannot_be_checked() -> None:
+    backend = PyWinCtlWindows(
+        host(PlatformName.MACOS, DisplayServer.QUARTZ, CapabilityState.DENIED),
+        module(),
+        quartz=quartz({"kCGWindowLayer": 0, "kCGWindowOwnerPID": 412}),
+    )
+    assert backend.active_process_id() is None

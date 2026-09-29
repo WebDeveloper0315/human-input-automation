@@ -90,6 +90,9 @@ class NullWindowBackend:
     def active_window(self) -> TargetWindow | None:
         return None
 
+    def active_process_id(self) -> int | None:
+        return None
+
 
 class NullCapabilityProbe:
     """Capability probe reporting that nothing is supported."""

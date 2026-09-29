@@ -295,6 +295,18 @@ Environment note: the tester's `XMODIFIERS=@im=ibus` and IM module variables
 were unset for the private display as a precaution; whether they matter was
 not tested (unsetting them alone did not make characters arrive).
 
+**First macOS run (2026-09-30, by the user, from the window):** `mac-test-1.md`
+(`App: Terminal`, two `run`s, `expect output`, `read output`, a `type`)
+**completed** - the first time the runner, the AppleScript terminal reader and
+the focus guard ran on macOS. It took **160 s** for 9 steps: typing ran at about
+1.5 s per keystroke, because the focus guard asked pywinctl for the whole
+focused window before every key, and on macOS each window property is an
+Accessibility round trip. Fixed: the guard now asks only which process owns the
+front window (one Quartz call), and looks up the window only when focus has
+moved (`test_typing_does_not_look_up_the_whole_window_for_every_key`). Not yet
+re-run on the Mac. `App: Terminal` (15 s) and `read output` (11 s) were also
+slow; `tools/platform_verify/macos_timing.py` measures each call, read-only.
+
 **Not verified:** macOS Terminal and iTerm2 (AppleScript text reading, the
 Automation permission prompt, Spotlight as a system surface, whether
 `active_window()` is fast enough there to check every keystroke), Windows (no
