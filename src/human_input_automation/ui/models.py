@@ -54,6 +54,7 @@ from ..core.events import (
     TargetActivated,
 )
 from ..core.keys import MouseButton, normalize_key, parse_shortcut
+from ..core.pointer_path import PointerStyle
 from ..core.screen import ScreenGeometry
 from ..core.target import PlatformName, PlatformReport, TargetWindow
 from ..core.timing import TimingProfile, TimingService
@@ -1205,6 +1206,11 @@ def typing_style_to_values(style: TypingStyle) -> dict[str, Any]:
         "enabled": not style.is_exact,
         "percent": round(style.typo_rate * 100, 2) or DEFAULT_TYPO_PERCENT,
     }
+
+
+def pointer_style_to_values(style: PointerStyle) -> dict[str, Any]:
+    """Panel values for an existing pointer style."""
+    return {"natural": not style.is_direct}
 
 
 def preview_delays(

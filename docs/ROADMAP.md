@@ -196,7 +196,17 @@ Blocked — no machine available:
 - [ ] Build the Windows and macOS artifacts (their CI jobs have never run)
 - [ ] macOS signing and notarization (no credentials)
 
-## Phase 8 — Running written work steps (proposed)
+## Phase 8 — Running written work steps
+
+### 8.0 — Input a body could have produced (done)
+
+- [x] Typing that mistypes a neighbouring key, pauses and corrects it, and
+      always leaves the text that was asked for
+- [x] Pointer movement along a bowed path with a bell-shaped speed, optional
+      overshoot and correction, and Fitts's-law duration - planned in the core
+      from the run's seed, replayed by the adapter
+- [x] Both verified on a real X server against a window that recorded what it
+      actually received
 
 The work in `refer/AutoScript/` is five guides written for a person: ordered
 stages, each in a named application, driven by data tables, checked against
@@ -206,7 +216,9 @@ first guide translated into it.
 
 ### 8.1 — The language
 
-- [ ] Grammar frozen (`docs/AUTOSCRIPT.md`), agreed before a parser exists
+- [x] Grammar written as motor primitives: the script says what the body does
+      (`docs/AUTOSCRIPT.md`), with two guides translated in `examples/`
+- [ ] Grammar frozen - agreed before a parser is built to it
 - [ ] Parser: Markdown document -> stages, steps, tables, blocks, routines
 - [ ] Strict by default: an unknown verb or a malformed step names its line
 - [ ] Validation: every `{{name}}` resolves, every routine and table exists,

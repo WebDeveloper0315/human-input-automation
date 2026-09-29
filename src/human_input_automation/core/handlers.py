@@ -24,6 +24,7 @@ from .editor_typing import Emit, Press, plan_code_typing
 from .engine import ActionRegistry, ExecutionContext
 from .errors import UnsupportedActionError
 from .keys import Key, KeyLike, parse_shortcut
+from .pointer_path import plan_pointer_path
 from .typing_style import Hesitate, TypeChars, TypingStep, Undo, plan_typing
 
 
@@ -144,19 +145,15 @@ def handle_shortcut(action: Shortcut, ctx: ExecutionContext) -> None:
 
 
 def handle_mouse_move(action: MouseMove, ctx: ExecutionContext) -> None:
-    duration = ctx.timing.mouse_move_duration_ms(action.duration_ms)
-    if action.relative:
-        ctx.mouse.move_by(action.x, action.y, duration, ctx.control)
-    else:
-        ctx.mouse.move_to(action.x, action.y, duration, ctx.control)
+    start = ctx.mouse.position()
+    end = (start[0] + action.x, start[1] + action.y) if action.relative else (action.x, action.y)
+    _travel_to(end, ctx, action.duration_ms)
 
 
 def handle_mouse_click(action: MouseClick, ctx: ExecutionContext) -> None:
     position = action.position
     if position is not None:
-        ctx.mouse.move_to(
-            position[0], position[1], ctx.timing.mouse_move_duration_ms(), ctx.control
-        )
+        _travel_to(position, ctx, None)
     for repetition in range(action.count):
         ctx.checkpoint()
         ctx.hold_button(action.button)
@@ -164,6 +161,25 @@ def handle_mouse_click(action: MouseClick, ctx: ExecutionContext) -> None:
         ctx.release_button(action.button)
         if repetition < action.count - 1:
             ctx.sleep_ms(ctx.timing.key_hold_ms())
+
+
+def _travel_to(
+    end: tuple[int, int], ctx: ExecutionContext, override_ms: float | None
+) -> None:
+    """Move the pointer to ``end`` the way this run's pointer style says to.
+
+    The path is planned here, in the core, from the same seeded generator as
+    the delays and the typing mistakes - so one seed still reproduces a whole
+    run, down to which way the hand curved.
+    """
+    start = ctx.mouse.position()
+    duration = ctx.timing.mouse_move_duration_ms(override_ms, distance_from=start, to=end)
+    ctx.mouse.follow_path(
+        plan_pointer_path(
+            start, end, duration_ms=duration, style=ctx.timing.pointer, rng=ctx.timing.rng
+        ),
+        ctx.control,
+    )
 
 
 def handle_mouse_down(action: MouseDown, ctx: ExecutionContext) -> None:

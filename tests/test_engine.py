@@ -75,7 +75,8 @@ def test_actions_run_in_order_after_the_target_is_activated() -> None:
     assert windows.calls[0] == "activate:win-1"
     assert keyboard.typed == "hi"
     assert keyboard.names == ["type_text", "key_down", "key_up"]
-    assert mouse.names == ["move_to", "button_down", "button_up"]
+    assert mouse.names == ["follow_path", "button_down", "button_up"]
+    assert mouse.position() == (10, 20)
 
 
 def test_typing_is_per_character_when_a_delay_is_configured() -> None:
@@ -117,9 +118,10 @@ def test_shortcut_presses_and_releases_in_reverse_order() -> None:
 
 
 def test_mouse_move_supports_absolute_and_relative_movement() -> None:
+    """A relative move is planned from wherever the pointer already is."""
     engine, _, mouse, _, _ = build_engine()
     engine.run(plan_of(MouseMove(x=100, y=50), MouseMove(x=5, y=-5, relative=True)))
-    assert mouse.calls == [("move_to", "100,50"), ("move_by", "5,-5")]
+    assert [path[-1] for path in mouse.paths] == [(100, 50), (105, 45)]
 
 
 def test_mouse_button_hold_and_release_are_supported() -> None:

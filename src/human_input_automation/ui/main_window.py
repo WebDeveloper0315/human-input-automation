@@ -40,6 +40,7 @@ from ..core.events import (
     RunStarted,
 )
 from ..core.plan import AutomationPlan, ExecutionLimits, RunOptions
+from ..core.pointer_path import PointerStyle
 from ..core.target import TargetWindow, WindowCapabilities
 from ..core.timing import TimingProfile
 from ..core.typing_style import TypingStyle
@@ -369,6 +370,7 @@ class MainWindow(QMainWindow):
             self.action_editor.set_actions([])
             self.timing_panel.set_values(timing_to_values(TimingProfile()))
             self.timing_panel.set_typing_style(TypingStyle())
+            self.timing_panel.set_pointer_style(PointerStyle())
         finally:
             self._applying = False
         self._set_dirty(False)
@@ -489,6 +491,7 @@ class MainWindow(QMainWindow):
             actions=self.action_editor.plan_actions,
             timing=self.timing_panel.profile() or TimingProfile(),
             typing=self.timing_panel.typing_style(),
+            pointer=self.timing_panel.pointer_style(),
             limits=ExecutionLimits(),
             options=RunOptions(seed=self.timing_panel.seed),
             name=name,
@@ -519,6 +522,7 @@ class MainWindow(QMainWindow):
                 self.action_editor.set_actions(plan.actions)
                 self.timing_panel.set_values(timing_to_values(plan.timing))
                 self.timing_panel.set_typing_style(plan.typing)
+                self.timing_panel.set_pointer_style(plan.pointer)
                 seed = plan.options.seed
                 self.timing_panel.seed_check.setChecked(seed is not None)
                 if seed is not None:
@@ -657,6 +661,7 @@ class MainWindow(QMainWindow):
             actions=self.action_editor.plan_actions,
             timing=profile,
             typing=self.timing_panel.typing_style(),
+            pointer=self.timing_panel.pointer_style(),
             limits=ExecutionLimits(),
             options=RunOptions(seed=self.timing_panel.seed, dry_run=dry_run),
             name="desktop plan",

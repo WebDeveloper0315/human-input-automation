@@ -408,6 +408,30 @@ def test_timing_panel_types_exactly_until_mistakes_are_switched_on() -> None:
     assert not style.is_exact
 
 
+def test_timing_panel_moves_the_pointer_like_a_hand_by_default() -> None:
+    from human_input_automation.core.pointer_path import PointerStyle
+
+    panel = TimingPanel()
+    assert panel.hand_check.isChecked()
+    assert not panel.pointer_style().is_direct
+
+    panel.hand_check.setChecked(False)
+    assert panel.pointer_style() == PointerStyle.direct()
+
+
+def test_timing_panel_round_trips_a_pointer_style() -> None:
+    from human_input_automation.core.pointer_path import PointerStyle
+
+    panel = TimingPanel()
+    bowed = PointerStyle(bow=0.2, overshoot_rate=0.5)
+    panel.set_pointer_style(bowed)
+    assert panel.hand_check.isChecked()
+    assert panel.pointer_style() == bowed
+
+    panel.set_pointer_style(PointerStyle.direct())
+    assert not panel.hand_check.isChecked()
+
+
 def test_timing_panel_round_trips_a_typing_style() -> None:
     from human_input_automation.core.typing_style import TypingStyle
 

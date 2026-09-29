@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
 
 from human_input_automation.core.actions import AUTO_CLOSED_PAIRS as _CLOSERS
 from human_input_automation.core.keys import Key, KeyLike, MouseButton, format_key
@@ -87,8 +88,19 @@ class FakeMouse:
     durations_ms: list[float] = field(default_factory=list)
     _position: tuple[int, int] = (0, 0)
 
+    #: Every path the engine asked for, so a test can look at its shape.
+    paths: list[list[tuple[int, int]]] = field(default_factory=list)
+
     def position(self) -> tuple[int, int]:
         return self._position
+
+    def follow_path(self, path: Any, cancel: CancelToken | None = None) -> None:
+        points = [(point.x, point.y) for point in path]
+        self.paths.append(points)
+        if points:
+            self._position = points[-1]
+        self.calls.append(("follow_path", f"{len(points)}"))
+        self.durations_ms.append(path[-1].at_ms if points else 0.0)
 
     def move_to(
         self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None

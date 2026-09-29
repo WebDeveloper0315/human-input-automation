@@ -7,10 +7,12 @@ application happens to be running on.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
 from ..ports.clock import CancelToken
 from .keys import KeyLike, MouseButton, format_key
+from .pointer_path import PathPoint
 from .target import TargetWindow
 
 
@@ -39,6 +41,13 @@ class RecordingMouse:
 
     def position(self) -> tuple[int, int]:
         return self._position
+
+    def follow_path(
+        self, path: Sequence[PathPoint], cancel: CancelToken | None = None
+    ) -> None:
+        if path:
+            self._position = (path[-1].x, path[-1].y)
+        self.calls.append(("follow_path", f"{len(path)} point(s)"))
 
     def move_to(
         self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None

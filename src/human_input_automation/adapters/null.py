@@ -10,6 +10,7 @@ from collections.abc import Sequence
 
 from ..core.dryrun import RecordingKeyboard, RecordingMouse, RecordingWindowControl
 from ..core.keys import KeyLike, MouseButton
+from ..core.pointer_path import PathPoint
 from ..core.target import (
     DisplayServer,
     PlatformName,
@@ -48,6 +49,11 @@ class NullMouse:
 
     def position(self) -> tuple[int, int]:
         return (0, 0)
+
+    def follow_path(
+        self, path: Sequence[PathPoint], cancel: CancelToken | None = None
+    ) -> None:
+        return None
 
     def move_to(
         self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None

@@ -79,6 +79,11 @@ interrupted save leaves the previous version intact — never a truncated file.
       "correction_pause_ms": 90.0, "correction_pause_jitter_ms": 45.0,
       "hesitation_rate": 0.0, "hesitation_ms": 450.0, "hesitation_jitter_ms": 250.0
     },
+    "pointer": {
+      "bow": 0.09, "bow_jitter": 0.05, "tremor_px": 1.0,
+      "overshoot_rate": 0.2, "overshoot_fraction": 0.04, "correction_share": 0.25,
+      "scale_with_distance": true, "step_ms": 8.0
+    },
     "limits": {
       "max_actions": 500, "max_text_length": 20000,
       "max_total_characters": 100000, "max_run_duration_s": 3600.0
@@ -216,6 +221,30 @@ finish in time.
 
 The desktop UI always runs with the defaults above; a profile's stored limits
 are read back for inspection but the GUI does not yet expose them for editing.
+
+## Pointer style
+
+`plan.pointer` decides how the pointer travels between two points. The default
+is a hand: an arc rather than a line, a speed that builds and brakes rather
+than a constant, and now and then a small overshoot and correction.
+
+| Field | Meaning |
+| --- | --- |
+| `bow`, `bow_jitter` | How far the path arcs away from the straight line, as a fraction of the distance. One direction per movement - a hand curves, it does not weave. |
+| `tremor_px` | Small deviations along the way, tapered to nothing at both ends. |
+| `overshoot_rate` | How often the pointer goes past the target before coming back. |
+| `overshoot_fraction` | How far past, as a fraction of the distance. |
+| `correction_share` | The share of the movement spent correcting an overshoot. |
+| `scale_with_distance` | Whether a longer reach takes longer, as Fitts's law says it does. The profile's `mouse_move_duration_ms` then describes a 200 px hop rather than every movement. |
+| `step_ms` | How often a position is written while moving. Also the longest a stop can be delayed by a movement in flight. |
+
+Whatever the settings, **the path ends exactly on the target** and takes
+exactly as long as it was asked to. Setting `bow`, `tremor_px` and
+`overshoot_rate` to zero gives a straight line at a constant speed, which is
+what the application did before this section existed.
+
+A profile written before it simply has no `"pointer"` key and loads with the
+default.
 
 ## Target identity
 

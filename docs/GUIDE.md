@@ -192,6 +192,24 @@ about 27 minutes to type. If a plan's text cannot be typed inside the time
 limit, the run log says so before anything is sent, because the limit is
 checked between actions and would otherwise drop the end of your plan.
 
+### How the pointer moves
+
+A pointer that travels in a straight line at a constant speed is the clearest
+sign that nobody is holding the mouse. By default this application moves it the
+way an arm does instead: along an arc, accelerating out of the start and
+braking into the target, occasionally overshooting by a few pixels and coming
+back. A long reach takes longer than a short one, roughly as Fitts's law says a
+real one does.
+
+Measured on a 894-pixel move: the path strays about 60 px from the straight
+line, and just over half the distance is covered in the middle third of the
+time. The same move with the box unticked covers a third of the distance in
+each third of the time, in a dead straight line.
+
+Untick *Move the pointer the way a hand does* in the Timing panel for the
+straight version. Either way the pointer **lands exactly on the target** and
+the movement takes exactly as long as it was asked to.
+
 ### Typing with mistakes
 
 By default the application types perfectly. Tick *Mistype and correct, the way a

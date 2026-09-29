@@ -47,6 +47,7 @@ from ...core.actions import (
 from ...core.errors import ValidationError
 from ...core.keys import Key, KeyLike, MouseButton, normalize_key
 from ...core.plan import AutomationPlan, ExecutionLimits, RunOptions
+from ...core.pointer_path import PointerStyle
 from ...core.target import DisplayServer, PlatformName, TargetWindow, WindowCapabilities
 from ...core.timing import TimingProfile
 from ...core.typing_style import TypingStyle
@@ -379,6 +380,33 @@ def typing_from_dict(data: Any, location: str = "plan.typing") -> TypingStyle:
         raise _fail("; ".join(issue.message for issue in error.issues), location) from None
 
 
+def pointer_to_dict(style: PointerStyle) -> dict[str, Any]:
+    return {field.name: getattr(style, field.name) for field in dataclasses.fields(style)}
+
+
+def pointer_from_dict(data: Any, location: str = "plan.pointer") -> PointerStyle:
+    mapping = _mapping(data, location)
+    defaults = PointerStyle()
+    allowed = {field.name for field in dataclasses.fields(PointerStyle)}
+    _reject_unknown(mapping, allowed, location)
+    try:
+        return PointerStyle(
+            scale_with_distance=_bool(
+                mapping,
+                "scale_with_distance",
+                location,
+                default=defaults.scale_with_distance,
+            ),
+            **{
+                name: _float(mapping, name, location, default=getattr(defaults, name))
+                for name in allowed
+                if name != "scale_with_distance"
+            },
+        )
+    except ValidationError as error:
+        raise _fail("; ".join(issue.message for issue in error.issues), location) from None
+
+
 def limits_to_dict(limits: ExecutionLimits) -> dict[str, Any]:
     return {field.name: getattr(limits, field.name) for field in dataclasses.fields(limits)}
 
@@ -502,6 +530,7 @@ def plan_to_dict(plan: AutomationPlan) -> dict[str, Any]:
         "actions": [action_to_dict(action) for action in plan.actions],
         "timing": timing_to_dict(plan.timing),
         "typing": typing_to_dict(plan.typing),
+        "pointer": pointer_to_dict(plan.pointer),
         "limits": limits_to_dict(plan.limits),
         "options": options_to_dict(plan.options),
     }
@@ -526,7 +555,9 @@ def plan_from_dict(
     a resolved target cannot pass :func:`validate_plan` and therefore cannot run.
     """
     mapping = _mapping(data, location)
-    _reject_unknown(mapping, {"actions", "timing", "typing", "limits", "options"}, location)
+    _reject_unknown(
+        mapping, {"actions", "timing", "typing", "pointer", "limits", "options"}, location
+    )
 
     raw_actions = mapping.get("actions")
     if not isinstance(raw_actions, list):
@@ -540,6 +571,7 @@ def plan_from_dict(
         actions=actions,
         timing=timing_from_dict(mapping.get("timing", {}), f"{location}.timing"),
         typing=typing_from_dict(mapping.get("typing", {}), f"{location}.typing"),
+        pointer=pointer_from_dict(mapping.get("pointer", {}), f"{location}.pointer"),
         limits=limits_from_dict(mapping.get("limits", {}), f"{location}.limits"),
         options=options_from_dict(mapping.get("options", {}), f"{location}.options"),
     )
@@ -646,6 +678,7 @@ def profile_to_dict(profile: Profile) -> dict[str, Any]:
             "actions": [],
             "timing": timing_to_dict(TimingProfile()),
             "typing": typing_to_dict(TypingStyle()),
+            "pointer": pointer_to_dict(PointerStyle()),
             "limits": limits_to_dict(ExecutionLimits()),
             "options": options_to_dict(RunOptions()),
         },

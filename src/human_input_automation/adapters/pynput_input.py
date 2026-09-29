@@ -22,10 +22,12 @@ executed):
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from ..core.errors import AdapterUnavailableError
 from ..core.keys import KeyLike, MouseButton
+from ..core.pointer_path import PathPoint, PointerStyle, plan_pointer_path
 from ..ports.clock import CancelToken
 from .keymap import resolve_button, resolve_key
 
@@ -96,32 +98,23 @@ class PynputMouse:
         x, y = self._controller.position
         return (int(x), int(y))
 
-    def move_to(
-        self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
+    def follow_path(
+        self, path: Sequence[PathPoint], cancel: CancelToken | None = None
     ) -> None:
-        """Move to an absolute position over ``duration_ms``.
+        """Replay a planned path: be at each point when its clock says to be.
 
-        A stop request ends the movement at the point it has reached; the
-        pointer is never left mid-flight for the remaining duration.
+        Scheduled against one start time rather than by sleeping between
+        points, so the cost of each position write does not accumulate into
+        drift and a movement really does take as long as it was planned to.
         """
-        if duration_ms <= 0:
-            self._controller.position = (x, y)
+        if not path:
             return
-
-        start_x, start_y = self.position()
         started = time.monotonic()
-        duration_s = duration_ms / 1000.0
-        steps = max(1, int(duration_ms / MOVE_STEP_MS))
-
-        for step in range(1, steps + 1):
+        for point in path:
             if cancel is not None and cancel.is_stop_requested():
                 return
-            progress = step / steps
-            self._controller.position = (
-                round(start_x + (x - start_x) * progress),
-                round(start_y + (y - start_y) * progress),
-            )
-            remaining = (started + duration_s * progress) - time.monotonic()
+            self._controller.position = (point.x, point.y)
+            remaining = (started + point.at_ms / 1000.0) - time.monotonic()
             if remaining <= 0:
                 continue
             if cancel is not None:
@@ -129,6 +122,25 @@ class PynputMouse:
                     return
             else:
                 time.sleep(remaining)
+
+    def move_to(
+        self, x: int, y: int, duration_ms: float, cancel: CancelToken | None = None
+    ) -> None:
+        """Move to an absolute position over ``duration_ms``, in a straight line.
+
+        The plain version, kept for callers that want nothing but a move. The
+        engine plans its own path instead, because how the pointer travels is
+        a decision for the core, not for the adapter.
+        """
+        if duration_ms <= 0:
+            self._controller.position = (x, y)
+            return
+        self.follow_path(
+            plan_pointer_path(
+                self.position(), (x, y), duration_ms=duration_ms, style=PointerStyle.direct()
+            ),
+            cancel,
+        )
 
     def move_by(
         self, dx: int, dy: int, duration_ms: float, cancel: CancelToken | None = None

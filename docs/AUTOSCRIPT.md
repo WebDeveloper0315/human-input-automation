@@ -1,244 +1,275 @@
 # AutoScript — a language for work steps
 
-A proposal, not yet an implementation. It exists so the work guides in
-`refer/AutoScript/` can be rewritten in a form this application can run, and so
-that form can be argued with *before* a parser is built to it.
+A specification, not yet an implementation. It exists so the work guides in
+`refer/AutoScript/` can be rewritten in a form this application can run.
+
+The program's job is to **read and perform** AutoScript. It does not write it:
+a guide is turned into a script separately, by a person or an assistant, and
+the result is what the program is handed. That is why this document is precise
+about what is legal rather than forgiving about what might be meant — and why
+§10 is written to be handed to an assistant doing the conversion.
 
 ---
 
-## 1. What the work actually is
+## 1. What the work is
 
-Five real guides were read end to end. They are not five different kinds of
-work; they are one kind of work with different applications bolted on.
+Five real guides were read end to end. They are one kind of work with different
+applications bolted on.
 
-| Guide | Applications | Steps | Code blocks | Data tables (rows) | Checks | "repeat…" |
-|---|---|---|---|---|---|---|
-| 1 Legal cases | Terminal, psql | 15 sub-tasks | 19 | – | 12 stated expectations | 3 near-identical awk lines |
-| 2 Portfolio map | Coggle (canvas), Chrome, XnView | 23 | – | 1 (8) | 2 | 6 |
-| 3 Classroom posters | Finder, Preview, Greenshot, Posterazor, TextEdit | 32 | 1 | – | 8 | 4 wizard passes |
-| 4 HR analysis | TextEdit, Postman, JASP, GeoGebra | 22 | 1 | – (18 inline) | 3 | 18 API sends |
-| 5 Warehouse | GeoGebra, Trello, Spotify | 60 | – | 2 (18) | 3 | 16 cards, 45 songs |
+| Guide | Applications | Steps | Data rows | Checks |
+|---|---|---|---|---|
+| 1 Legal cases | Terminal, psql | 15 sub-tasks, 19 command blocks | – | 12 |
+| 2 Portfolio map | Coggle, Chrome, XnView | 23 | 8 | 2 |
+| 3 Classroom posters | Finder, Preview, Greenshot, Posterazor, TextEdit | 32 | – | 8 |
+| 4 HR analysis | TextEdit, Postman, JASP, GeoGebra | 22 | 18 | 3 |
+| 5 Warehouse | GeoGebra, Trello, Spotify | 60 | 18 | 3 |
 
-Seven properties hold across all five:
+Seven properties hold across all of them, and each is a language requirement:
 
-1. **A task is an ordered list of stages, each in a named application.** The
-   application changes often and is always stated. It is the primary context;
-   everything else is relative to it.
-2. **Three kinds of step, and only three.** Send input (type, press, click,
-   drag); observe something on screen; assert that what was observed is what
-   was expected.
-3. **Tables drive most of the volume.** 8 branches × 4 children, 8 zones, 16
-   cards, 18 employees, 45 songs. Writing those out step by step would be
-   thousands of lines nobody will maintain. Tables and loops are not a
-   convenience here, they are the difference between a usable document and an
-   unusable one.
-4. **Observed values feed later steps.** Guide 3 reads pixel dimensions off an
-   inspector and types them into a checklist. Guide 4 reads an HTTP status per
-   request and builds a CSV out of 18 of them. Without variables, those
-   deliverables cannot be produced at all.
-5. **Expectations are stated constantly** — `COPY 30`, `UPDATE 8`, "31 lines",
-   "at least 128×128", "all MATCH". They are the author already telling us
-   where the work can go wrong. They are the natural place to stop.
-6. **Repetition is near-identical, not identical.** Four Posterazor passes
-   differing in file, orientation and width. Three awk lines differing in a
-   name. That is a routine with parameters, not copy-paste.
-7. **Recovery is part of the work.** Guide 1 ends with three named failures and
-   what to do about each.
-
-A language that has applications, ordered steps, a closed verb set, variables,
-tables, loops, parameterised routines, observation and assertions covers all
-five guides. A language missing any one of them does not.
+1. **A task is ordered stages, each in a named application.** The application
+   changes often and is always stated.
+2. **Every step is one of three things**: move or press something, look at the
+   screen, or check what was seen.
+3. **Tables carry most of the volume** — 16 Trello cards, 18 API sends, 45
+   songs. Without tables and loops these documents are unmaintainable.
+4. **Observed values feed later steps.** Guide 3 reads pixel sizes off an
+   inspector and types them into a checklist; guide 4 reads 18 HTTP statuses
+   and builds a CSV from them.
+5. **Expectations are stated constantly** — `COPY 30`, `31 lines`, `at least
+   128×128`, `all MATCH`. They are where a run should stop.
+6. **Repetition is near-identical, not identical** — four Posterazor passes
+   differing in file, orientation and width. That is a routine with parameters.
+7. **Recovery is part of the work** — guide 1 names three failures and fixes.
 
 ## 2. The decision
 
-**AutoScript is a small declarative language hosted inside Markdown.**
+**AutoScript is a declarative language of motor primitives, hosted in
+Markdown.**
 
-The container is ordinary Markdown — the guides are already Markdown, and its
-headings, fenced blocks and tables are exactly the three data shapes the work
-uses. Inside that, each step is one list item with a defined grammar and a
-closed set of about twenty verbs.
+Two halves, and both matter:
+
+*Motor primitives* because the thing performing the work is a humanoid robot,
+and the script is its behaviour. A robot does not "run a command": it presses
+`command`+`space`, types `t-e-r-m-i-n-a-l` one key at a time, and presses
+Enter. It does not "click Save": it moves a hand along a curved path to a
+point, and presses a button. The script says what the body does. Anything that
+hides that — a verb that means "somehow achieve this" — is the wrong altitude
+for this project.
+
+*Markdown* because the guides are already Markdown, and its headings, fenced
+blocks and tables are exactly the three data shapes this work uses. The
+document stays readable as a document, reviewable in a diff, and printable as
+the work instruction it also is.
 
 ### Why not something that already exists
 
-* **Python, or any scripting language.** Ruled out on a rule this project
-  already holds: a profile is data, and loading one can never execute anything
-  (`docs/PROFILE-FORMAT.md`). A work document that is a program means a
-  document that can do anything the moment it is opened. AutoScript is data all
-  the way down: substitution, never evaluation.
-* **Robot Framework.** The closest existing fit — keyword-driven, tabular,
-  variables, readable. Rejected for three reasons: its keywords are Python, so
-  it reintroduces exactly the execution model above; its column-separated
-  syntax is unpleasant to hand-write; and adopting it would mean adopting its
-  runner rather than the engine, timing and emergency stop already built here.
-* **Gherkin.** Human-readable and has example tables, but its steps are free
-  text bound to code by regex. "Click the plus" would mean whatever a step
-  definition decided it meant. This work needs the opposite: a step that does
-  not parse should be an error, not a guess.
-* **YAML or JSON.** Machine-friendly and hostile to the person writing 45 songs
-  by hand. The author of these guides writes prose documents; asking for three
-  levels of significant indentation per step is asking them to stop.
+* **Python, or any scripting language.** Ruled out on a rule this project has
+  held from the start: a profile is data, and loading one can never execute
+  anything. A work document is a profile. AutoScript substitutes; it never
+  evaluates.
+* **Robot Framework.** The closest existing fit, and rejected because its
+  keywords are Python (the same problem), its column syntax is unpleasant to
+  write by hand, and adopting it means adopting its runner instead of the
+  engine, timing, typing style and emergency stop already built here.
+* **Gherkin.** Its steps are free text bound to code by regex, so "click the
+  plus" means whatever a step definition decided. This needs the opposite: a
+  step that does not parse must be an error, not a guess.
+* **YAML or JSON.** Machine-friendly, and hostile to whoever hand-writes 45
+  songs.
 
-### Why Markdown specifically
+## 3. The two worked examples
 
-The guides are already in it, so translation is rewriting lines rather than
-changing medium. A stage is an `##` heading. A literal to type is a fenced
-block — which is how guide 1 already writes its SQL. A data table is a Markdown
-table — which is how guides 2 and 5 already write theirs. And the document
-stays a document: readable by a person who has never seen this spec, reviewable
-in a diff, printable as the work instruction it also is.
+Both are from the request, written in AutoScript.
 
-## 3. The shape of a document
-
-````markdown
-# Overdue case report
-
-Runs on: macOS
-Recorded: yes
-
-## Prepare the database
-
-App: Terminal
-
-- run `brew services list | grep postgres`
-- expect output contains "postgres"
-- run `mkdir -p ~/Documents/legal_data/{raw,exports,summaries,backups}`
-- run `cd ~/Documents/legal_data`
-
-## Import the cases
-
-Block: cases_csv
-
-```
-case_id,case_name,attorney
-1,Harborline Logistics v. Meridian Corp,Priya Shah
-```
-
-- run `cat > raw/cases_raw.csv <<'EOF'`
-- type block "cases_csv"
-- run `EOF`
-- run `wc -l raw/cases_raw.csv`
-- expect output contains "31"
-````
-
-`# ` is the task. `## ` is a stage. `App:` sets the application for the steps
-that follow it and stays in force until the next one. A list item is a step.
-Anything that is not a directive, a step, a table or a block is prose, and is
-ignored — so the notes and tips that make a guide readable survive translation.
-
-## 4. Steps
-
-| Verb | Example | Notes |
-|---|---|---|
-| `open` | `open "https://coggle.it"` | URL, file path, or application |
-| `type` | `type "Portfolio Strategy 2024"` | Goes through the run's typing style |
-| `type block` | `type block "cases_csv"` | A fenced block by name |
-| `press` | `press enter` · `press cmd+s` | Named keys and chords |
-| `run` | ``run `psql -l` `` | Type it and press Enter. Terminal apps only |
-| `click` | `click "New Diagram"` · `click button "Send"` · `click menu "File > New Folder"` | Optional role: button, menu, tab, icon, field |
-| `double-click` | `double-click "Water_cycle_diagram.png"` | |
-| `right-click` | `right-click "{{Branch}}"` | |
-| `hover` | `hover "centre node"` | Reveals the controls Coggle only shows on hover |
-| `drag` | `drag "stock chart.png" to "Large-Cap"` · `drag region around "diagram"` | |
-| `set` | `set "Width" to 594` | A labelled field |
-| `choose` | `choose "PNG" from "Format"` | Dropdown, radio group, colour picker |
-| `tick` / `untick` | `tick "Std. deviation"` | Checkboxes. Not `check`, which reads as an assertion |
-| `read` | `read "Image size" as water_px` | Names what was seen |
-| `record` | `record {{employee_id}}, {{status}} into "ApiLog"` | Appends an observation to a table |
-| `wait` | `wait for "Save"` · `wait 2 s` | |
-| `expect` | `expect output contains "COPY 30"` · `expect {{pages}} == 6` | |
-| `do` | `do "save as" with name="x.pdf", folder="Print_PDFs"` | Calls a routine |
-| `for each` | `for each row in "Zones":` | Indented steps below it |
-| `repeat` | `repeat 4 times:` | Indented steps below it |
-
-Arguments are `"quoted"` for labels and values, `` `backticked` `` for literal
-text to send, `{{name}}` for substitution, and bare numbers. The keywords
-(`to`, `from`, `as`, `in`, `with`, `contains`, `times`) are fixed.
-
-## 5. Tables, blocks, routines, variables
-
-**Tables** are Markdown tables introduced by `Table: <name>`. Columns become
-variables inside a `for each`:
+**Deleting a file:**
 
 ```markdown
-Table: Zones
+App: Finder
 
-| Zone | Size | Area | Capacity |
-|---|---|---|---|
-| A Bulk Storage North | 12×8 | 96 | 38 |
-| B Bulk Storage South | 10×9 | 90 | 36 |
-
-- for each row in "Zones":
-  - click menu "Text"
-  - type "Area: {{Area}} sq m, Capacity: {{Capacity}} pallets"
+- screenshot
+- find "quarterly_report.pdf" as file
+- move to {{file}}
+- right-click
+- screenshot
+- find "Move to Trash" as menu_item
+- move to {{menu_item}}
+- left-click
 ```
 
-**Blocks** are fenced blocks introduced by `Block: <name>`, typed verbatim by
-`type block`. Substitution applies inside them, which is what makes guide 4's
-eighteen API bodies one block instead of eighteen.
+**Opening Terminal from Spotlight:**
 
-**Routines** are `## Routine: <name>` stages with named parameters, called with
-`do`. Guide 3's four Posterazor passes are one routine called four times; guide
-1's three awk lines are one routine called three times.
+```markdown
+App: Finder
 
-**Variables** come from three places and nowhere else: a table column inside a
-loop, a routine parameter, and `read ... as`. There is no arithmetic and no
-expression language. If a document needs a number computed, the author writes
-the number — as these guides already do.
+- key-click cmd+space
+- wait 300 ms
+- type "terminal"
+- key-click enter
+- wait for window "Terminal"
+```
 
-## 6. Finding things on screen
+Note what is *not* hidden. Locating is its own step and yields a position.
+Moving is its own step. Clicking happens where the pointer already is, because
+that is what a hand does — and it is why `left-click` takes no argument.
 
-`click "New Diagram"` is the whole problem. Four ways to resolve a name to a
-point, cheapest and most reliable first:
+## 4. The primitives
+
+### Moving and pressing
+
+| Verb | Example | Means |
+|---|---|---|
+| `move to` | `move to {{file}}` · `move to 1204,640` · `move to "Save"` | Travel the pointer there along a human path |
+| `left-click` | `left-click` · `left-click twice` | Press and release where the pointer is |
+| `right-click` | `right-click` | |
+| `middle-click` | `middle-click` | |
+| `press-button` / `release-button` | `press-button left` | The two halves of a drag |
+| `scroll` | `scroll down 3` · `scroll up 1` | Wheel notches |
+| `type` | `type "terminal"` · `type block "cases_csv"` | One character at a time, with this run's typing style |
+| `key-click` | `key-click enter` · `key-click cmd+space` · `key-click ctrl+a` | One key or one chord |
+| `key-down` / `key-up` | `key-down shift` | Holding a modifier across other steps |
+| `wait` | `wait 300 ms` · `wait for "Save"` · `wait for window "Terminal"` | |
+
+`move to "Save"` is shorthand for `find "Save" as _it` then `move to {{_it}}`.
+It is allowed because it reads well, and it expands to the primitives — nothing
+is hidden by it.
+
+### Looking
+
+| Verb | Example | Means |
+|---|---|---|
+| `screenshot` | `screenshot` | Take a fresh picture; `find` and `read` work from the most recent one |
+| `find` | `find "Move to Trash" as menu_item` | Locate something, store its position |
+| `read` | `read "Image size" as water_px` · `read output as result` | Store text |
+| `record` | `record {{employee_id}}, {{status}} into "ApiLog"` | Append an observation to a table |
+
+### Checking
+
+| Verb | Example |
+|---|---|
+| `expect` | `expect output contains "COPY 30"` · `expect {{pages}} == 6` · `expect "Save" exists` |
+
+### Structure
+
+| Construct | Example |
+|---|---|
+| Task | `# Overdue case report` (one, at the top) |
+| Stage | `## Sub-task 4 — Create the table` |
+| Application | `App: Terminal` — sticky until the next one |
+| Loop | `for each row in "Zones":` with indented steps |
+| Repeat | `repeat 4 times:` with indented steps |
+| Routine | `## Routine: save as` with `{{parameters}}`, called by `do` |
+| Table | `Table: Zones` followed by a Markdown table |
+| Block | `Block: cases_csv` followed by a fenced block |
+
+Arguments are `"quoted"` for names and values, `` `backticked` `` for literal
+text to send, `{{name}}` for substitution, bare numbers for counts and
+coordinates. The keywords (`to`, `as`, `in`, `from`, `with`, `contains`,
+`times`, `exists`) are fixed.
+
+## 5. One piece of sugar, and its expansion
+
+Guide 1 is sixty shell commands. Writing each as `type` + `key-click enter`
+doubles its length for no gain, so:
+
+```markdown
+- run `psql -l`
+```
+
+**expands to exactly**
+
+```markdown
+- type `psql -l`
+- key-click enter
+```
+
+It is legal only when the current `App:` is declared a terminal. It is sugar,
+not a shortcut past the typing: the characters still go one at a time, with
+this run's mistakes and pauses, because that is what the robot's hands do.
+
+## 6. Variables
+
+Three sources and no others: a table column inside `for each`, a routine
+parameter, and `find` / `read ... as`. A position variable holds a point; a
+text variable holds a string.
+
+There is no arithmetic and no expression language. Where a guide needs a
+computed number it already writes the number, and so does the script.
+
+## 7. Finding things on screen
+
+`find "Move to Trash"` is the hard part. Four ways to turn a name into a point,
+cheapest and most reliable first:
 
 1. **The accessibility tree.** macOS `AXUIElement`, Windows UI Automation,
-   AT-SPI on Linux. Gives real element names, roles and rectangles. Exact, no
-   guessing, no model. It covers native applications and Chrome, which exposes
-   its tree to assistive technology. This application already requires macOS
-   Accessibility permission for input, so on the machine this work runs on the
-   permission is already granted.
-2. **Text on screen.** Screenshot, OCR, match the label, click the middle of
-   its box. Local and small — Tesseract is already installed on this machine;
-   RapidOCR or PaddleOCR-ONNX are better on UI text and still tens of
-   megabytes. This is what covers canvas applications that expose nothing:
-   **Coggle and GeoGebra draw their nodes; there is no button called "+" to
-   find.**
-3. **A picture of the element.** Template matching for things with no text at
-   all: the Greenshot menu-bar icon, Coggle's hover-plus, a download arrow.
-   Deterministic and fast.
-4. **A vision-language model.** Last, not first. Slowest, largest, least
+   AT-SPI on Linux. Real element names, roles and rectangles — exact, no
+   guessing, no model. Covers native applications and Chrome. This application
+   already requires macOS Accessibility permission for input, so on the machine
+   this work runs on it is already granted.
+2. **Text on screen.** Screenshot, OCR, match the label, take the middle of its
+   box. Local and small. This is what covers applications that draw their own
+   interface: **Coggle and GeoGebra have no button called "+" to ask about.**
+3. **A picture of the element.** Template matching, for things with no text at
+   all: a menu-bar icon, a hover-plus, a download arrow.
+4. **A vision-language model.** Last, not first: slowest, largest, least
    predictable, and the only one that can answer "which of these is the colour
-   picker" when the other three fail.
+   picker" when the other three cannot.
 
-The important claim: **most of this work does not need a model.** A terminal
-task is entirely tiers 1-2. A wizard like Posterazor is tier 1. The model earns
-its place on canvas applications and on reading unstructured screens, not on
-every click.
+**Most of this work needs no model.** Guide 1 is tiers 1–2 entirely. A wizard
+like Posterazor is tier 1. The model earns its place on canvas applications and
+on reading unstructured screens, not on every click.
 
 ### The screen map
 
-Names in a document are resolved through a per-application **screen map** that
-lives beside it: `"Large-Cap"` → how to find it. An entry can be an
-accessibility query, a piece of text to OCR for, a reference image, or a point
-captured with the position picker built for that purpose. This is where the
-per-application mess is confined, so the document stays about the work.
+Names resolve through a per-application **screen map** kept beside the script:
+`"Large-Cap"` → how to find it. An entry can be an accessibility query, text to
+OCR for, a reference image, or a point captured with the position picker. The
+per-application mess lives there, so the script stays about the work.
 
-## 7. When a step fails
+## 8. When a step fails
 
 Nothing is best-effort. A step that cannot find its target, or an `expect` that
 does not hold, stops the run at that step and reports which line of which
-document failed and what was on screen at the time. The engine's existing
-emergency stop applies throughout, unchanged.
+document failed and what was on screen. The engine's emergency stop applies
+throughout, unchanged.
 
 Version 1 stops. Recovery — guide 1's three named failures — needs a `when`
-conditional and is deliberately deferred until the straight-line case is solid.
+conditional, and waits until the straight-line case is solid.
 
-## 8. What it cannot do, on purpose
+## 9. What it cannot do, on purpose
 
 * No arithmetic, no expressions, no branching in v1, no user-defined verbs.
 * No code execution. `run` types a command into a terminal window; it never
-  hands a string to a shell from inside this process. The distinction matters:
-  everything this application does remains synthetic input that the user
-  started and can stop, and a document remains data.
+  hands a string to a shell from inside this process. Everything the
+  application does stays synthetic input that the user started and can stop,
+  and a document stays data.
 * Because `run` types real commands, a document is as dangerous as the commands
-  in it. Every run has a dry run that prints every command and every keystroke
-  first, and that is not optional advice — it is the intended way to use this.
+  in it. Every run has a dry run that prints every keystroke first, and that is
+  the intended way to use this, not advice.
+
+## 10. Converting a guide into AutoScript
+
+For whoever — person or assistant — turns a guide into a script.
+
+1. **One stage per sub-task**, keeping the guide's own heading text.
+2. **State the application** whenever it changes, before the first step that
+   needs it.
+3. **Write what the body does, not what the user means.** "Right-click the file
+   and choose Move to Trash" is six steps: screenshot, find, move, right-click,
+   find, move, left-click. Never one.
+4. **Take a fresh `screenshot` after anything that changes the screen** — a
+   click that opens a menu, a window that appears — and before the `find` that
+   depends on it.
+5. **Turn every stated expectation into an `expect`.** "Expected: COPY 30"
+   becomes `expect output contains "COPY 30"`. These are the stopping points;
+   a script without them fails silently.
+6. **Turn every table into a `Table:` and a `for each`.** If the guide says
+   "repeat for the other 7", the table has 8 rows.
+7. **Turn near-identical repetition into a `## Routine:`** called with
+   parameters. Four Posterazor passes are one routine, not four stages.
+8. **Keep the prose.** Anything that is not a directive, a step, a table or a
+   block is ignored by the parser, so the notes and warnings that make a guide
+   readable should survive into the script.
+9. **Use `run` only in a terminal.** Everywhere else, `type` and `key-click`.
+10. **Invent nothing.** If a step cannot be written with the verbs in §4, leave
+    the guide's sentence in as prose and say so — a missing verb is a
+    conversation about the language, not a reason to guess.

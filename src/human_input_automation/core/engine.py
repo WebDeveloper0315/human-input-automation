@@ -239,7 +239,9 @@ class AutomationEngine:
             return report
 
         keyboard, mouse, windows, clock = self._ports_for(plan)
-        timing = TimingService(plan.timing, style=plan.typing, seed=plan.options.seed)
+        timing = TimingService(
+            plan.timing, style=plan.typing, pointer=plan.pointer, seed=plan.options.seed
+        )
         ctx = ExecutionContext(
             keyboard=keyboard,
             mouse=mouse,
