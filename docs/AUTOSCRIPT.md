@@ -351,6 +351,21 @@ recorded into.
 * A routine that uses `run` or `output` says which terminal it is in with its
   own `- App:` step; it cannot know what its caller had open.
 
+### 5.14 What `App:` names
+
+`App: Name` is matched against running applications in two steps, and stops at
+the first that gives exactly one window:
+
+1. **The application's name** - `Terminal`, `Finder`, `Postman`. This is the
+   normal case, and it does not depend on what a window happens to be titled:
+   Terminal's windows are titled `user — -zsh — 80×24`, never `Terminal`.
+2. **Otherwise, a window title containing the name** - which is how a web
+   application is reached: `App: Coggle` finds the Chrome window whose title
+   contains `Coggle`.
+
+Two or more matches at the step that decides is an error, never a guess, in
+the same way as `find` (§5.7). No match fails the step.
+
 ## 6. One piece of sugar, and its expansion
 
 Guide 1 is sixty shell commands. Writing each as `type` + `key-click enter`
