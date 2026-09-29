@@ -196,7 +196,67 @@ Blocked — no machine available:
 - [ ] Build the Windows and macOS artifacts (their CI jobs have never run)
 - [ ] macOS signing and notarization (no credentials)
 
-## Phase 8 — Advanced
+## Phase 8 — Running written work steps (proposed)
+
+The work in `refer/AutoScript/` is five guides written for a person: ordered
+stages, each in a named application, driven by data tables, checked against
+stated expectations. `docs/AUTOSCRIPT.md` argues for a small declarative
+language inside Markdown to carry them, and `examples/autoscript/` holds the
+first guide translated into it.
+
+### 8.1 — The language
+
+- [ ] Grammar frozen (`docs/AUTOSCRIPT.md`), agreed before a parser exists
+- [ ] Parser: Markdown document -> stages, steps, tables, blocks, routines
+- [ ] Strict by default: an unknown verb or a malformed step names its line
+- [ ] Validation: every `{{name}}` resolves, every routine and table exists,
+      every `do` matches its parameters
+- [ ] Rendering: a plan a person can read, and a dry run that prints every
+      keystroke before any is sent
+- [ ] The five guides translated as fixtures, and parsed in the test suite
+
+No adapters, no screen reading; entirely testable offline. This is the part
+that unblocks writing documents.
+
+### 8.2 — Terminal tasks, end to end
+
+- [ ] `App:`, `run`, `type block`, `wait for`, `expect output contains`
+- [ ] Terminal output read back exactly - through the accessibility tree where
+      the terminal exposes its text, not by OCR
+- [ ] Guide 1 runs unattended against a scratch database, and stops on the
+      first expectation that does not hold
+- [ ] Verified on the real platform, in the harness
+
+The highest-value target and the one with no pixel-hunting in it.
+
+### 8.3 — Seeing the screen
+
+- [ ] `ScreenCapturePort`, and a capture adapter per platform
+- [ ] OCR adapter (local, small) behind an `ElementLocatorPort`
+- [ ] Template matching for elements with no text
+- [ ] The screen map: a name in a document -> how to find it in an application
+- [ ] The position picker feeds the screen map, so a canvas element can be
+      taught once by dragging
+
+### 8.4 — Accessibility locators
+
+- [ ] macOS `AXUIElement` first: it is the machine this work runs on, and the
+      permission the application already asks for
+- [ ] Windows UI Automation, AT-SPI on Linux
+- [ ] Locator tiers ordered cheapest-first, with the tier that answered
+      reported in the run log
+
+### 8.5 — A local vision model, only where the cheaper tiers fail
+
+- [ ] Measured first: which steps in the five guides actually need one
+- [ ] Runs locally; no screenshot leaves the machine
+- [ ] Behind the same `ElementLocatorPort`, as the last tier
+- [ ] Honest reporting when it is guessing
+
+### 8.6 — Recovery
+
+- [ ] `when` conditionals, for the named failures guides already document
+- [ ] Retry with backoff where a step is safe to repeat, never where it is not
 
 ## Out of scope
 
