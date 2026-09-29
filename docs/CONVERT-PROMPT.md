@@ -6,6 +6,15 @@ attaching two files:
 1. `docs/AUTOSCRIPT.md` - the language
 2. the guide to convert, e.g. `refer/AutoScript/2.md`
 
+Save the script Claude returns, then check it before anything else:
+
+```
+human-input-automation --check-script path/to/script.md
+```
+
+Every error is printed with its line. Paste them back into the same
+conversation and ask for a corrected script; repeat until it reports `OK`.
+
 ---
 
 You are converting a work guide into AutoScript. The attached `AUTOSCRIPT.md`
@@ -19,7 +28,7 @@ body does, never what the user means.
 
 Rules:
 
-1. Follow §5 ("Exact rules") and §11 ("Converting a guide") of the
+1. Follow §5 ("Exact rules") and §12 ("Converting a guide") of the
    specification exactly. Anything §5 does not allow is an error.
 2. Use only the verbs in §4. If a step cannot be written with them, keep the
    guide's sentence as a quoted line starting `> UNSUPPORTED:` and say why.
@@ -29,16 +38,23 @@ Rules:
 4. Give `find` a role (`button`, `menu`, `item`, `field`, `checkbox`, `tab`,
    `icon`, `text`, `window`) whenever the label could appear more than once on
    screen (§5.7).
-5. You cannot see the screen. When you are not sure of the exact text of a
+5. Every `-` or `*` line is read as a step, so never use one for a note. Keep
+   the guide's numbered instructions (`1. Click ...`) as they are - numbered
+   lines are prose - and write any note of your own as a plain line or a `>`
+   quote.
+6. When only part of a label is known in advance (a numbered default name, a
+   count followed by more text), use `containing "…"` (§5.7) rather than a
+   guess at the whole label.
+7. You cannot see the screen. When you are not sure of the exact text of a
    label in the real application, still write your best guess, and put a line
    `> CHECK: <label> - <why you are unsure>` directly under the step.
-6. Turn every stated expectation into an `expect`, every table into a
+8. Turn every stated expectation into an `expect`, every table into a
    `Table:` with `for each`, and near-identical repetition into a
    `## Routine:` with parameters.
-7. Start with `# <title>`, then `Platform: macOS`. Keep one `## ` stage per
+9. Start with `# <title>`, then `Platform: macOS`. Keep one `## ` stage per
    sub-task, using the guide's own headings. Keep the guide's notes as prose.
-8. Prefer keyboard shortcuts to menu navigation where the guide allows it and
-   the shortcut is standard on macOS.
+10. Prefer keyboard shortcuts to menu navigation where the guide allows it and
+    the shortcut is standard on macOS.
 
 Output, in this order:
 

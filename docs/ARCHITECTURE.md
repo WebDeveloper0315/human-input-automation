@@ -40,6 +40,7 @@ same name and confuses packaging and analysis tools.
 | `core/timing.py` | `TimingProfile`, `TimingService` |
 | `core/typing_style.py` | `TypingStyle` and the keystroke plan behind mistyping |
 | `core/editor_typing.py` | Predicting what a code editor does, and planning around it |
+| `core/autoscript/` | AutoScript: `model`, `parser`, `validator`; text in, checked script out, nothing run |
 | `core/pointer_path.py` | `PointerStyle` and the timed path the pointer follows; adapters only replay it |
 | `ui/position_picker.py` | Capturing a screen position by dragging to it |
 | `core/validation.py` | Plan/action/target validation, errors vs warnings |
@@ -51,6 +52,7 @@ same name and confuses packaging and analysis tools.
 | `ports/*` | `KeyboardPort`, `MousePort` (incl. `follow_path`), `WindowDiscoveryPort`, `WindowControlPort`, `Clock`, `CancelToken`, `CapabilityProbe`, `HotkeyPort`, `ScreenPort` |
 | `core/capabilities.py` | `CapabilityMatrix`: per-capability state, reason, permission |
 | `core/screen.py` | `MonitorInfo`, `ScreenGeometry`, coordinate space |
+| `application/autoscript.py` | Reading a script file from disk for the core to parse |
 | `adapters/platform_info.py` | Platform/display-server/permission detection, capability matrices |
 | `adapters/keymap.py` | **The only** place platform key names live |
 | `adapters/x11_windows.py` | X11/EWMH window discovery and activation (Linux) |

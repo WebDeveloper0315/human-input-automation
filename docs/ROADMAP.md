@@ -214,21 +214,23 @@ stated expectations. `docs/AUTOSCRIPT.md` argues for a small declarative
 language inside Markdown to carry them, and `examples/autoscript/` holds the
 first guide translated into it.
 
-### 8.1 — The language
+### 8.1 — The language (parser and validator done)
 
 - [x] Grammar written as motor primitives: the script says what the body does
-      (`docs/AUTOSCRIPT.md`), with two guides translated in `examples/`
-- [ ] Grammar frozen - agreed before a parser is built to it
-- [ ] Parser: Markdown document -> stages, steps, tables, blocks, routines
-- [ ] Strict by default: an unknown verb or a malformed step names its line
-- [ ] Validation: every `{{name}}` resolves, every routine and table exists,
-      every `do` matches its parameters
-- [ ] Rendering: a plan a person can read, and a dry run that prints every
-      keystroke before any is sent
-- [ ] The five guides translated as fixtures, and parsed in the test suite
-
-No adapters, no screen reading; entirely testable offline. This is the part
-that unblocks writing documents.
+      (`docs/AUTOSCRIPT.md`)
+- [x] Four guides converted by Claude from the spec alone
+      (`examples/autoscript/`) - the conformance corpus, and the source of
+      every grammar decision since: numbered lines are prose, `containing`,
+      label normalisation, `type table` headers, routine scope
+- [x] Parser: Markdown document -> stages, steps, tables, blocks, routines;
+      every problem reported with its line, never only the first
+- [x] Validator: every name defined before use, routines called as declared,
+      tables there to loop over, a terminal wherever a command is run, and
+      no look at the screen through a stale screenshot - followed through
+      loops (second time round included) and routine calls
+- [x] `--check-script`: compiler-style output, UNSUPPORTED and CHECK notes
+      listed, exit status for batch use; never runs a step
+- [ ] Rendering: a dry run that prints every keystroke a script expands to
 
 ### 8.2 — Terminal tasks, end to end
 

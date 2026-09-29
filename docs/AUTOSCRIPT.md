@@ -7,7 +7,7 @@ The program's job is to **read and perform** AutoScript. It does not write it:
 a guide is turned into a script separately, by a person or an assistant, and
 the result is what the program is handed. That is why this document is precise
 about what is legal rather than forgiving about what might be meant — and why
-§11 is written to be handed to an assistant doing the conversion.
+§12 is written to be handed to an assistant doing the conversion.
 
 ---
 
@@ -176,10 +176,17 @@ never a guess.
 * `App:`, `Platform:`, `Table:` and `Block:` at the start of a line are
   directives. `App:` may also be written as a step, `- App: Finder`, which is
   how a routine or a loop body changes application.
-* A list item (`-`, `*` or `1.`) is a step.
+* A `-` or `*` list item is a step. **A numbered item (`1.`) is prose**: guides
+  number their instructions, and keeping those lines as they were is how the
+  guide survives inside the script. Every conversion so far did exactly this.
+* `###` and deeper headings are prose - a heading inside a stage.
+* `Table:` and `Block:` may be followed directly by their table or fenced
+  block, or after blank lines.
 * **Everything else is prose and is ignored** — including other `Word: value`
-  lines such as `Runs on:` or `Estimated:`. This is what lets a guide's notes
-  and warnings survive conversion untouched.
+  lines such as `Runs on:`, `Expected:` or `Tip:`, and `>` quotes. This is what
+  lets a guide's notes and warnings survive conversion untouched.
+* A note for the author is never a list item. `- This lists the folder` is an
+  unknown verb, `This`; write the note as a plain line or a `>` quote.
 
 ### 5.2 Nesting
 
@@ -196,10 +203,16 @@ nested list anywhere else is an error, not an accident to be tolerated.
 | `{{name}}` | Substitution | `\{{` for a literal `{{` |
 | `12`, `1204,640` | Counts, durations, positions | — |
 
+Inside quotes, **only `\"` and `\\` are escapes**; a backslash before anything
+else stays as written. That is what lets a pattern read as it would anywhere
+else: `"\d+ × \d+"` is the regular expression `\d+ × \d+`.
+
 Substitution happens in quoted strings, in backticked literals and in blocks.
 Only `{{name}}`, where `name` is letters, digits and underscores, is
 substituted — so shell braces (`{raw,exports}`) and awk's `{n++}` pass through
-untouched. An unknown `{{name}}` is an error before anything runs.
+untouched. It is read left to right, so a substitution may sit right against a
+brace: `{"score":{{score}}}` needs no space before its last `}`. An unknown
+`{{name}}` is an error before anything runs.
 
 ### 5.4 Keys
 
@@ -236,14 +249,36 @@ This is the rule most easily broken when converting a guide, and the one whose
 failure is silent: a position read off the old screen is a real position,
 pointing at the wrong thing.
 
+How it is followed through a script:
+
+* **A loop is checked for its second time round too.** A `find` at the top of a
+  loop body may be safe the first time, because a screenshot came before the
+  loop, and stale every later time, because the body's own click came after it.
+* **A routine starts knowing nothing** about the screen, whoever called it.
+* **A `do` leaves the screen as the routine left it.** A routine that ends with
+  `wait for` hands back a current screenshot; one that ends with a click does
+  not.
+
 ### 5.7 `find`
 
 ```
 find [role] "label" [in window "Title"] as name
+find [role] containing "part of a label" [in window "Title"] as name
 ```
 
 Roles: `button`, `menu`, `item`, `field`, `checkbox`, `tab`, `icon`, `text`,
 `window`. The result is the centre of what was found.
+
+**A label matches the whole of what is on screen**, compared after three
+normalisations and no others: runs of whitespace become one space, `…` and
+`...` are the same, and curly quotes are the same as straight ones. Case
+matters. So `"Save"` does not match `Save As…`, and `"Graphics ..."` does match
+`Graphics…`.
+
+`containing` matches part of a label instead - for text that is only partly
+known in advance, such as `My Playlist #7` or a header reading
+`25 songs, about 1 hr 30 min`. The same forms work in `wait for`,
+`expect … exists` and `move to`.
 
 * No match: the step fails.
 * **More than one match: the step fails**, listing where each one was. Add a
@@ -263,6 +298,7 @@ text, not off a screenshot, so it is exact and does not go stale.
 |---|---|
 | `expect output contains "t"` | The output includes `t` |
 | `expect output does not contain "t"` | It does not |
+| `expect output matches "pattern"` | The pattern matches anywhere in it |
 | `expect "label" exists` | `find "label"` would find exactly one |
 | `expect "label" does not exist` | It would find none |
 | `expect {{v}} contains "t"` | The variable's text includes `t` |
@@ -280,8 +316,11 @@ record name={{value}}, other="text" into "Table"
 ```
 
 Columns are named. The table is created by its first `record` and every later
-one must use the same columns. A recorded table can be typed out with
-`type table "Table"`, as CSV.
+one must use the same columns. It can be looped over with `for each` - once
+something has been recorded into it, which the validator checks - and typed
+out with `type table "Table"`: **a header row of the column names first, then
+one row per record**, as CSV. A declared `Table:` never changes and cannot be
+recorded into.
 
 ### 5.11 `wait`
 
@@ -307,6 +346,10 @@ one must use the same columns. A recorded table can be typed out with
 * A routine may call another, never itself, directly or through others.
 * A routine may change application. The application in force after `do` is
   the one the routine left, so a script that cares says `App:` again.
+* **A routine sees only its parameters and the names it sets itself** - never
+  its caller's. Whatever a routine needs, it is given.
+* A routine that uses `run` or `output` says which terminal it is in with its
+  own `- App:` step; it cannot know what its caller had open.
 
 ## 6. One piece of sugar, and its expansion
 
@@ -332,7 +375,10 @@ this run's mistakes and pauses, because that is what the robot's hands do.
 
 Three sources and no others: a table column inside `for each`, a routine
 parameter, and `find` / `read ... as`. A position variable holds a point; a
-text variable holds a string.
+text variable holds a string; neither can be used as the other.
+
+A name must be set before the step that uses it. Names set in one stage are
+there in the next, and a name set inside a loop is there after it.
 
 There is no arithmetic and no expression language. Where a guide needs a
 computed number it already writes the number, and so does the script.
@@ -388,7 +434,19 @@ conditional, and waits until the straight-line case is solid.
   in it. Every run has a dry run that prints every keystroke first, and that is
   the intended way to use this, not advice.
 
-## 11. Converting a guide into AutoScript
+## 11. Checking a script
+
+```
+human-input-automation --check-script examples/autoscript/*.md
+```
+
+Reads and validates each file against everything in §5, and runs nothing. Each
+problem is printed as `file:line: severity: code: message`, so an editor can
+jump to it; every `> UNSUPPORTED:` note is listed; and the number of `> CHECK:`
+notes is given, since those are the labels to confirm in the real application
+before a run. The exit status is 1 if any file has an error.
+
+## 12. Converting a guide into AutoScript
 
 For whoever — person or assistant — turns a guide into a script.
 
@@ -415,6 +473,11 @@ For whoever — person or assistant — turns a guide into a script.
 10. **Disambiguate `find`** (§5.7) with a role or a window whenever a label
     could appear twice. "File" is a menu, a column header and a word in a
     document all at once.
-11. **Invent nothing.** If a step cannot be written with the verbs in §4, leave
+11. **Never use a list item for a note.** Every `-` line is a step; notes are
+    plain lines or `>` quotes. Keep the guide's own numbered lines as they are:
+    numbered lines are prose (§5.1).
+12. **Use `containing`** (§5.7) when only part of a label is known in advance.
+13. **Run `--check-script`** (§11) on the result, and fix what it reports.
+14. **Invent nothing.** If a step cannot be written with the verbs in §4, leave
     the guide's sentence in as prose and say so — a missing verb is a
     conversation about the language, not a reason to guess.

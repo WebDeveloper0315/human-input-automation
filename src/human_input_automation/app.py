@@ -141,6 +141,41 @@ def run_validate_profile(path: str, paths: ApplicationPaths | None = None) -> in
     return 0
 
 
+def run_check_script(files: list[str]) -> int:
+    """Parse and validate AutoScript files. Never runs a step.
+
+    Output is compiler-style - ``file:line: severity: code: message`` - so an
+    editor can jump to each line, and the exit status is 1 when any file has an
+    error, so the check can gate a batch of conversions.
+    """
+    from .application.autoscript import check_script_file
+
+    failed = False
+    for name in files:
+        report = check_script_file(name)
+        failed |= not report.ok
+        script = report.script
+        for issue in report.issues:
+            line = "".join(ch for ch in issue.location if ch.isdigit()) or "0"
+            print(f"{name}:{line}: {issue.severity.value}: {issue.code}: {issue.message}")
+        verdict = "OK" if report.ok else f"{len(report.errors)} error(s)"
+        print(
+            f"{name}: {verdict} - {len(script.stages)} stage(s), {len(script.routines)} "
+            f"routine(s), {script.step_count} step(s), {len(report.warnings)} warning(s)"
+        )
+        unsupported = report.notes("UNSUPPORTED")
+        checks = report.notes("CHECK")
+        for note in unsupported:
+            print(f"{name}:{note.line}: unsupported: {note.text}")
+        if checks:
+            print(
+                f"{name}: {len(checks)} CHECK note(s) - labels to confirm against the "
+                "real application before a run"
+            )
+    print("Nothing was run and no input was generated.")
+    return 1 if failed else 0
+
+
 def run_smoke_test(paths: ApplicationPaths | None = None) -> int:
     """Verify a packaged build actually works. Sends no input.
 
@@ -273,6 +308,13 @@ def run(argv: list[str] | None = None) -> int:
         help="validate a profile file and exit; never executes it",
     )
     parser.add_argument(
+        "--check-script",
+        metavar="PATH",
+        nargs="+",
+        help="parse and validate AutoScript files, then exit (never runs a step, "
+        "sends no input)",
+    )
+    parser.add_argument(
         "--smoke-test",
         action="store_true",
         help="verify this build starts, opens its window and stores a profile, "
@@ -302,6 +344,8 @@ def run(argv: list[str] | None = None) -> int:
         return run_profiles(paths)
     if args.validate_profile:
         return run_validate_profile(args.validate_profile, paths)
+    if args.check_script:
+        return run_check_script(args.check_script)
     if args.check:
         return run_check(paths)
     return run_gui(paths)
