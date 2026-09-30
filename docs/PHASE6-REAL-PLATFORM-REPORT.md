@@ -320,7 +320,9 @@ So `App:` now finds applications through `adapters/macos_apps.py`
 (NSWorkspace + the Quartz window list) and brings them forward with
 `NSRunningApplication`, falling back to LaunchServices (`open -a`) when macOS
 declines; windows are listed only to find a web application by its title.
-Not yet re-run on the Mac.
+Re-measured after that change on the same Mac: running applications **2.4 ms**
+(12 found), front window owner 1.3 ms; pywinctl's full listing still 15.0 s,
+now used only for title matches. A script run with both changes: not yet.
 
 **Not verified:** macOS Terminal and iTerm2 (AppleScript text reading, the
 Automation permission prompt, Spotlight as a system surface, whether
