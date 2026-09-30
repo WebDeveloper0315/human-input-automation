@@ -172,9 +172,10 @@ class TimingPanel(QGroupBox):
         layout.addLayout(preview_row)
         layout.addStretch(1)
 
-        # Enough room for the grid plus the seed row and the preview, so a
-        # splitter cannot squeeze the fields out of existence.
-        self.setMinimumHeight(self.sizeHint().height())
+        # No fixed minimum here: one measured now is measured before the window
+        # is styled, and macOS's larger controls then clipped the last rows.
+        # The layout's own minimum holds at any font, and the main window's
+        # splitters are not allowed to collapse below it.
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
 
         self.refresh_preview()

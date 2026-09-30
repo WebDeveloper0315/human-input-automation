@@ -259,18 +259,24 @@ contain no commands or scripts — they cannot execute anything.
 ### Running an AutoScript
 
 A guide converted into AutoScript (`docs/AUTOSCRIPT.md`, `docs/CONVERT-PROMPT.md`)
-is checked, walked through, then run. In the window, the **AutoScript** panel
-does all three:
+is checked, walked through, then run. In the window, it lives in the
+**Script** tab beside **Actions**, and the Run row's **Start** and **Dry run**
+act on whichever tab is showing:
 
-1. **Open script...** — choose the `.md` file. It is checked at once; errors,
-   and lines this version cannot run yet, are listed under it. Nothing runs.
-2. **Dry run script** — every step, loops and routines unrolled, appears in the
+1. **Script → Open script...** — choose the `.md` file. It is checked at once:
+   its steps are listed where the actions would be, and errors, or lines this
+   version cannot run yet, are listed above them. Nothing runs.
+2. **Dry run** — every step, loops and routines unrolled, appears in the
    *Dry run / preview* panel with an estimated duration. Nothing is sent.
-3. **Run script** — the file is read and checked again (so edits since opening
+3. **Start** — the file is read and checked again (so edits since opening
    count), you are asked to confirm and shown which applications it will use,
-   then the countdown from the Run row starts. The window minimises if
-   *Minimise while running* is ticked; the emergency stop stays on screen.
-   Each step is logged by its line number in the run log.
+   then the countdown starts. A script names its own applications, so no
+   target window needs selecting. The window minimises if *Minimise while
+   running* is ticked; the emergency stop stays on screen. Each step is logged
+   by its line number in the run log.
+
+Switch back to the **Actions** tab and Start runs the plan again, as before;
+loading a profile switches to it.
 
 The script types and moves with the **Timing** panel's settings — delays,
 mistakes and pointer style — exactly as a plan does. **Reload** reads the file

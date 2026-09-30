@@ -80,7 +80,7 @@ same name and confuses packaging and analysis tools.
 | `application/profiles/resolver.py` | Finding a saved target again, deterministically |
 | `application/profiles/service.py` | Storage + resolution + existing validation |
 | `ui/models.py` | **Qt-free** presentation logic: run-state machine, control enablement, capability banner, action/timing forms, log and error formatting |
-| `ui/script_panel.py` | The AutoScript panel: open, reload, dry run, run - content from `models.script_view` |
+| `ui/script_panel.py` | The Script tab beside Actions: open, reload, the script's steps and problems - content from `models.script_view`; the Run row's Start/Dry run act on the tab showing |
 | `ui/run_bridge.py` | The single worker-thread → Qt-thread boundary |
 | `ui/main_window.py` | Window assembly, service wiring, unsaved-change tracking |
 | `ui/profile_panel.py` | Profile picker, New/Save/Duplicate/Delete/Import/Export |

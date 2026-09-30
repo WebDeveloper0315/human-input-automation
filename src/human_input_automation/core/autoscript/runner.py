@@ -972,6 +972,11 @@ def _button(button: Button) -> MouseButton:
     return MouseButton(button.value)
 
 
+def describe_step(step: Step) -> str:
+    """One line for a step as written, ``{{names}}`` left in place."""
+    return _describe(step, _Frame())
+
+
 def _describe(step: Step, frame: _Frame) -> str:
     """One line for the run log, with substitutions made where they can be."""
 

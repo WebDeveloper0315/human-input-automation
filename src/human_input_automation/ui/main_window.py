@@ -12,7 +12,7 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
-from PySide6.QtCore import Qt, Slot
+from PySide6.QtCore import QEvent, Qt, Slot
 from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -159,9 +160,20 @@ class MainWindow(QMainWindow):
 
     # -- construction ------------------------------------------------------
     def _build_layout(self) -> None:
+        # What a run does: a plan of actions, or an AutoScript file. Start and
+        # Dry run act on whichever tab is showing.
+        self.work_tabs = QTabWidget()
+        self.work_tabs.setAccessibleName("What to run")
+        self.action_editor.setTitle("")
+        self.action_editor.setFlat(True)
+        self.work_tabs.addTab(self.action_editor, "Actions")
+        self.work_tabs.addTab(self.script_panel, "Script")
+        self.work_tabs.setTabToolTip(0, "A plan of actions for the selected target window")
+        self.work_tabs.setTabToolTip(1, "An AutoScript file: it names its own applications")
+
         top = QSplitter(Qt.Orientation.Horizontal)
         top.addWidget(self.target_panel)
-        top.addWidget(self.action_editor)
+        top.addWidget(self.work_tabs)
         top.setStretchFactor(0, 1)
         top.setStretchFactor(1, 2)
 
@@ -189,13 +201,13 @@ class MainWindow(QMainWindow):
         # layout had to overlap its widgets - which is exactly what happened to
         # the target panel, whose active-target label was drawn over the window
         # list once a real target made it wrap onto a second line.
-        for panel, floor in (
+        self._floors = (
             (self.target_panel, 185),
-            (self.action_editor, 185),
+            (self.work_tabs, 185),
+            (self.timing_panel, 0),
             (self.dry_run_panel, 140),
             (self.run_log, 90),
-        ):
-            panel.setMinimumHeight(max(floor, panel.minimumSizeHint().height()))
+        )
         for splitter in (top, middle, body):
             splitter.setChildrenCollapsible(False)
 
@@ -208,7 +220,8 @@ class MainWindow(QMainWindow):
         self.body_scroll.setWidgetResizable(True)
         self.body_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self.body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        body.setMinimumHeight(600)
+        self._body = body
+        self._apply_floors()
 
         central = QWidget()
         layout = QVBoxLayout(central)
@@ -216,7 +229,6 @@ class MainWindow(QMainWindow):
         layout.setSpacing(6)
         layout.addWidget(self.banner)
         layout.addWidget(self.profile_panel)
-        layout.addWidget(self.script_panel)
         layout.addWidget(self.body_scroll, 1)
         # The run controls sit outside the splitter and keep their own height,
         # so Start and the emergency stop can never be squeezed off screen.
@@ -227,9 +239,29 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self._fit_to_screen()
 
-        self.setTabOrder(self.target_panel, self.action_editor)
-        self.setTabOrder(self.action_editor, self.timing_panel)
+        self.setTabOrder(self.target_panel, self.work_tabs)
+        self.setTabOrder(self.work_tabs, self.timing_panel)
         self.setTabOrder(self.timing_panel, self.controls)
+
+    def _apply_floors(self) -> None:
+        """Minimum heights from what each panel's contents need *now*.
+
+        Measured again whenever the window is shown or restyled: a measurement
+        taken while building the window predates the platform's style, and on
+        macOS the larger controls then had the last rows of a panel clipped.
+        """
+        for panel, floor in self._floors:
+            panel.setMinimumHeight(max(floor, panel.minimumSizeHint().height()))
+        self._body.setMinimumHeight(max(600, self._body.minimumSizeHint().height()))
+
+    def showEvent(self, event: Any) -> None:  # Qt naming convention
+        self._apply_floors()
+        super().showEvent(event)
+
+    def changeEvent(self, event: Any) -> None:  # Qt naming convention
+        if event.type() in (QEvent.Type.FontChange, QEvent.Type.StyleChange):
+            self._apply_floors()
+        super().changeEvent(event)
 
     def _fit_to_screen(self) -> None:
         """Never open taller or wider than the desktop it appears on."""
@@ -258,16 +290,15 @@ class MainWindow(QMainWindow):
         self.banner.details_requested.connect(self.show_onboarding)
         self.stop_overlay.emergency_requested.connect(self.emergency_stop)
         self.stop_overlay.restore_requested.connect(self.restore_from_run)
-        self.controls.start_requested.connect(self.start_run)
+        self.controls.start_requested.connect(self.start_requested)
         self.controls.pause_requested.connect(self.pause_run)
         self.controls.resume_requested.connect(self.resume_run)
         self.controls.stop_requested.connect(self.stop_run)
         self.controls.emergency_requested.connect(self.emergency_stop)
-        self.controls.dry_run_requested.connect(self.dry_run)
+        self.controls.dry_run_requested.connect(self.dry_run_requested)
         self.script_panel.open_requested.connect(self.open_script)
         self.script_panel.reload_requested.connect(self.reload_script)
-        self.script_panel.dry_run_requested.connect(self.dry_run_script)
-        self.script_panel.run_requested.connect(self.run_script)
+        self.work_tabs.currentChanged.connect(lambda _index: self._sync_controls())
 
     # -- first run and permissions -----------------------------------------
     def build_first_run_summary(self) -> FirstRunSummary:
@@ -531,6 +562,7 @@ class MainWindow(QMainWindow):
 
     def _apply_profile(self, profile: Profile) -> None:
         """Populate the editors from a profile without marking them dirty."""
+        self.show_actions_tab()  # a profile is a plan of actions
         self._applying = True
         try:
             self._profile = profile
@@ -696,6 +728,32 @@ class MainWindow(QMainWindow):
         return plan
 
     # -- run lifecycle -----------------------------------------------------
+    @property
+    def script_mode(self) -> bool:
+        """Whether the Script tab is showing, so Start and Dry run act on it."""
+        return self.work_tabs.currentWidget() is self.script_panel
+
+    def show_script_tab(self) -> None:
+        self.work_tabs.setCurrentWidget(self.script_panel)
+
+    def show_actions_tab(self) -> None:
+        self.work_tabs.setCurrentWidget(self.action_editor)
+
+    @Slot()
+    def start_requested(self) -> None:
+        """The Run row's Start: the script or the plan, by the tab showing."""
+        if self.script_mode:
+            self.run_script()
+        else:
+            self.start_run()
+
+    @Slot()
+    def dry_run_requested(self) -> None:
+        if self.script_mode:
+            self.dry_run_script()
+        else:
+            self.dry_run()
+
     @Slot()
     def start_run(self) -> None:
         if self._state.is_active:
@@ -762,21 +820,24 @@ class MainWindow(QMainWindow):
             return
         chosen = path or self._ask_for_script_path()
         if chosen:
-            self._check_script(chosen)
+            self._check_script(chosen, announce=True)
+            self.show_script_tab()
 
     @Slot()
     def reload_script(self) -> None:
         if self._script is not None and not self._state.is_active:
-            self._check_script(self._script.path)
+            self._check_script(self._script.path, announce=True)
 
-    def _check_script(self, path: str) -> ScriptCheck:
+    def _check_script(self, path: str, *, announce: bool = False) -> ScriptCheck:
         check = self._service.check_script(path)
         self._script = check
         view = script_view(check)
+        unchanged = view == self.script_panel.view
         self.script_panel.show_view(view)
-        self._log(f"Script {view.title}: {view.summary}")
-        for problem in view.problems:
-            self._log(f"  {problem}")
+        if announce or not unchanged:  # re-read before every run; only news is logged
+            self._log(f"Script {view.title}: {view.summary}")
+            for problem in view.problems:
+                self._log(f"  {problem}")
         return check
 
     @property
@@ -979,6 +1040,7 @@ class MainWindow(QMainWindow):
             self._state,
             has_target=self.target_panel.selected_target is not None,
             has_actions=bool(self.action_editor.plan_actions),
+            script=self.script_panel.view if self.script_mode else None,
         )
         self.controls.apply_state(state)
         self.target_panel.set_locked(not state.editing_enabled)

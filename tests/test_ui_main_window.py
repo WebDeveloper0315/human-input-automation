@@ -526,3 +526,32 @@ def test_the_window_never_opens_larger_than_the_desktop(harness: Any) -> None:
     available = screen.availableGeometry()
     assert app.window.width() <= max(app.window.minimumWidth(), available.width())
     assert app.window.height() <= max(app.window.minimumHeight(), available.height())
+
+
+# -- layout ------------------------------------------------------------------
+def test_restyling_after_construction_never_clips_the_timing_panel(
+    harness: Any, qt_app: Any
+) -> None:
+    """macOS styles the window when it is shown, after it was measured.
+
+    A minimum height fixed while building the window was then too small for
+    macOS's larger controls, and the last row of the Timing panel - the
+    mistakes and pointer checkboxes - was cut off.
+    """
+    app = harness()
+    original = qt_app.font()
+    try:
+        larger = qt_app.font()
+        larger.setPointSize(original.pointSize() + 5)
+        qt_app.setFont(larger)
+        app.window.resize(1180, 940)
+        app.window.show()
+        qt_app.processEvents()
+
+        panel = app.window.timing_panel
+        needed = panel.layout().minimumSize().height()
+        assert panel.height() >= needed
+        bottom = panel.hand_check.mapTo(panel, panel.hand_check.rect().bottomLeft()).y()
+        assert bottom <= panel.height()
+    finally:
+        qt_app.setFont(original)

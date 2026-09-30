@@ -37,8 +37,8 @@ from ..core.actions import (
     TypeText,
     Wait,
 )
-from ..core.autoscript.model import UseApp, walk
-from ..core.autoscript.runner import ScriptOutcome, StepStarted
+from ..core.autoscript.model import ForEach, Repeat, Step, UseApp, walk
+from ..core.autoscript.runner import ScriptOutcome, StepStarted, describe_step
 from ..core.capabilities import CapabilityName, CapabilityState
 from ..core.errors import ValidationError
 from ..core.events import (
@@ -154,9 +154,28 @@ _STATUS_TEXT: dict[UiState, str] = {
 
 
 def controls_for(
-    state: UiState, *, has_target: bool = True, has_actions: bool = True
+    state: UiState,
+    *,
+    has_target: bool = True,
+    has_actions: bool = True,
+    script: ScriptView | None = None,
 ) -> ControlsState:
-    """Map a UI state (plus plan readiness) onto the control enablement."""
+    """Map a UI state (plus plan readiness) onto the control enablement.
+
+    With ``script`` - the Script tab is showing - Start and Dry run act on the
+    script instead, and are ready when it can be run or walked through; a
+    script names its own applications, so no target is needed.
+    """
+    if script is not None and not state.is_active:
+        return ControlsState(
+            start_enabled=script.can_run,
+            pause_enabled=False,
+            resume_enabled=False,
+            stop_enabled=False,
+            dry_run_enabled=script.can_dry_run,
+            editing_enabled=True,
+            status_text=_STATUS_TEXT[state],
+        )
     ready = has_target and has_actions
     if state.is_active:
         return ControlsState(
@@ -1391,6 +1410,9 @@ class ScriptView:
     title: str = "No script open"
     summary: str = "Open an AutoScript file (.md) to check it, preview it and run it."
     problems: tuple[str, ...] = ()
+    #: The script's steps as written, stage headings included - what the
+    #: Script tab lists where the Actions tab lists actions.
+    steps: tuple[str, ...] = ()
     has_script: bool = False
     can_dry_run: bool = False
     can_run: bool = False
@@ -1423,6 +1445,7 @@ def script_view(check: ScriptCheck | None) -> ScriptView:
         title=title,
         summary=summary,
         problems=problems + warnings,
+        steps=script_step_rows(check),
         has_script=True,
         can_dry_run=check.can_dry_run,
         can_run=check.can_run,
@@ -1440,6 +1463,26 @@ def _grouped_refusals(check: ScriptCheck, shown: int = 8) -> tuple[str, ...]:
         more = f" and {len(numbers) - shown} more" if len(numbers) > shown else ""
         label = "line" if len(numbers) == 1 else "lines"
         rows.append(f"{label} {listed}{more}: {message}")
+    return tuple(rows)
+
+
+def script_step_rows(check: ScriptCheck) -> tuple[str, ...]:
+    """Stages, then routines, each step on its own row, nested steps indented."""
+    script = check.script
+    rows: list[str] = []
+
+    def add(steps: tuple[Step, ...], depth: int) -> None:
+        for step in steps:
+            rows.append(f"{'    ' * depth}line {step.line}: {describe_step(step)}")
+            if isinstance(step, (ForEach, Repeat)):
+                add(step.body, depth + 1)
+
+    for stage in script.stages:
+        rows.append(f"## {stage.heading}" if stage.heading else "## (untitled stage)")
+        add(stage.steps, 1)
+    for name, routine in script.routines.items():
+        rows.append(f"## Routine: {name}")
+        add(routine.steps, 1)
     return tuple(rows)
 
 
