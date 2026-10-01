@@ -392,6 +392,17 @@ focused.
 
 ## 4. Troubleshooting
 
+**Collecting logs for a test report.** Two logs, for two purposes:
+
+* The **Run log** panel shows every step by its line number and why a run
+  stopped. **Save log...** writes it to a text file you choose, with the app
+  version, platform and open script at the top. It is only ever saved when you
+  click: it contains what the script typed. **Clear log** between tests keeps
+  each file to one run.
+* The **log file** - `~/Library/Logs/human-input-automation/` on macOS - holds
+  warnings and errors from inside the program, never typed text. Start with
+  `human-input-automation --verbose` to see the same lines in the terminal.
+
 **"Unable to activate the selected window."**
 The run stopped before typing anything — that is the safety gate working. On
 Wayland, check the target is an XWayland application (native Wayland windows

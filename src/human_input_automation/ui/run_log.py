@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QPlainTextEdit, QPushButton, QVBoxLayout
 
 
@@ -13,6 +14,9 @@ class RunLog(QGroupBox):
     """
 
     MAX_BLOCKS = 2000
+
+    #: The user asked to keep the log; the window decides where it goes.
+    save_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__("Run log")
@@ -28,8 +32,16 @@ class RunLog(QGroupBox):
         self.clear_button.setAccessibleName("Clear run log")
         self.clear_button.clicked.connect(self.clear)
 
+        self.save_button = QPushButton("Save log...")
+        self.save_button.setAccessibleName("Save the run log to a file")
+        self.save_button.setToolTip(
+            "Write everything in this log to a text file you choose - for test reports"
+        )
+        self.save_button.clicked.connect(self.save_requested.emit)
+
         buttons = QHBoxLayout()
         buttons.addStretch(1)
+        buttons.addWidget(self.save_button)
         buttons.addWidget(self.clear_button)
 
         layout.addWidget(self.view)

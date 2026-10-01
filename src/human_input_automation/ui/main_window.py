@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QEvent, Qt, Slot
@@ -33,6 +34,7 @@ from ..application.profiles import (
     ProfileError,
     ProfileState,
 )
+from ..application.run_log import run_log_filename, run_log_text, save_run_log
 from ..application.service import AutomationService, ScriptSettings
 from ..core.autoscript.runner import StepStarted
 from ..core.events import (
@@ -296,6 +298,7 @@ class MainWindow(QMainWindow):
         self.controls.stop_requested.connect(self.stop_run)
         self.controls.emergency_requested.connect(self.emergency_stop)
         self.controls.dry_run_requested.connect(self.dry_run_requested)
+        self.run_log.save_requested.connect(self.save_log)
         self.script_panel.open_requested.connect(self.open_script)
         self.script_panel.reload_requested.connect(self.reload_script)
         self.work_tabs.currentChanged.connect(lambda _index: self._sync_controls())
@@ -677,6 +680,39 @@ class MainWindow(QMainWindow):
             return None
         path, _ = QFileDialog.getOpenFileName(
             self, "Import profile", "", "Profile files (*.json);;All files (*)"
+        )
+        return path or None
+
+    @Slot()
+    def save_log(self, path: str | None = None) -> None:
+        """Write the run log to a file the user picks. Never automatically."""
+        lines = self.run_log.lines
+        if not lines:
+            self._show_message("Nothing to save", "The run log is empty.")
+            return
+        chosen = path or self._ask_for_log_path()
+        if not chosen:
+            return
+        host = self._service.host
+        text = run_log_text(
+            lines,
+            platform=f"{host.platform.value}/{host.display_server.value}",
+            script=self._script.path if self._script is not None else None,
+        )
+        problem = save_run_log(chosen, text)
+        if problem is not None:
+            self._show_message("Log not saved", f"Could not write {chosen}: {problem}")
+            return
+        self._log(f"Run log saved to {chosen}")
+
+    def _ask_for_log_path(self) -> str | None:
+        if not self._show_dialogs:
+            return None
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save run log",
+            str(Path.home() / run_log_filename()),
+            "Text files (*.txt);;All files (*)",
         )
         return path or None
 
